@@ -2,6 +2,8 @@ pub mod apps;
 pub mod cleaner;
 pub mod commands;
 pub mod db;
+pub mod developer;
+pub mod docker;
 pub mod duplicates;
 pub mod safety;
 pub mod scanner;
@@ -23,6 +25,7 @@ pub fn run() {
         duplicate_cancel_token: Arc::new(AtomicBool::new(false)),
         duplicate_clean_cancel_token: Arc::new(AtomicBool::new(false)),
         storage_cancel_token: Arc::new(AtomicBool::new(false)),
+        developer_cancel_token: Arc::new(AtomicBool::new(false)),
     };
 
     tauri::Builder::default()
@@ -43,6 +46,12 @@ pub fn run() {
             commands::inspect_dropped_app,
             commands::uninstall_application,
             commands::clean_orphaned_data,
+            commands::scan_developer_spaces,
+            commands::cancel_developer_scan,
+            commands::inspect_developer_workspace,
+            commands::clean_developer_artifacts,
+            commands::inspect_docker,
+            commands::clean_docker_resources,
             commands::get_scan_history,
             commands::get_cleanup_history,
             commands::get_whitelist,

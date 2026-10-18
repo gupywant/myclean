@@ -3,6 +3,12 @@ use crate::apps::{
 };
 use crate::cleaner::{ActiveAppWarning, CleanRequest, CleanResult, Cleaner};
 use crate::db::{CleanupRecord, Database, ScanRecord, WhitelistEntry};
+use crate::developer::{
+    DeveloperArtifactItem, DeveloperCleanRequest, DeveloperEngine, DeveloperScanResult,
+};
+use crate::docker::{
+    DockerCleanRequest, DockerCleanResult, DockerManager, DockerScanResult,
+};
 use crate::duplicates::{CleanDuplicatesRequest, DuplicateScanProgress, DuplicateScanResult, DuplicateScanner};
 use crate::scanner::{ScanProgress, ScanResult, ScanScopeConfig, Scanner};
 use crate::storage::{StorageAnalysisResult, StorageAnalyzer};
@@ -19,6 +25,7 @@ pub struct AppState {
     pub duplicate_cancel_token: Arc<AtomicBool>,
     pub duplicate_clean_cancel_token: Arc<AtomicBool>,
     pub storage_cancel_token: Arc<AtomicBool>,
+    pub developer_cancel_token: Arc<AtomicBool>,
 }
 
 #[tauri::command]
@@ -296,4 +303,64 @@ pub fn open_in_finder(path: String) -> Result<(), String> {
         .map_err(|e| format!("Failed to open in Finder: {}", e))?;
     Ok(())
 }
+
+#[tauri::command]
+pub async fn scan_developer_spaces(
+    state: State<'_, AppState>,
+    workspaces: Option<Vec<String>>,
+) -> Result<DeveloperScanResult, String> {
+    state.developer_cancel_token.store(false, Ordering::Relaxed);
+    let cancel = state.developer_cancel_token.clone();
+    tokio::task::spawn_blocking(move || DeveloperEngine::scan_all(workspaces, &cancel))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub fn cancel_developer_scan(state: State<'_, AppState>) -> bool {
+    state.developer_cancel_token.store(true, Ordering::Relaxed);
+    true
+}
+
+#[tauri::command]
+pub async fn inspect_developer_workspace(
+    workspace_path: String,
+) -> Result<Vec<DeveloperArtifactItem>, String> {
+    tokio::task::spawn_blocking(move || {
+        DeveloperEngine::inspect_single_workspace(Path::new(&workspace_path))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn clean_developer_artifacts(
+    state: State<'_, AppState>,
+    request: DeveloperCleanRequest,
+    workspaces: Option<Vec<String>>,
+) -> Result<CleanResult, String> {
+    let db = state.db.clone();
+    tokio::task::spawn_blocking(move || DeveloperEngine::clean_artifacts(request, workspaces, &db))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn inspect_docker() -> Result<DockerScanResult, String> {
+    tokio::task::spawn_blocking(DockerManager::inspect)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn clean_docker_resources(
+    state: State<'_, AppState>,
+    request: DockerCleanRequest,
+) -> Result<DockerCleanResult, String> {
+    let db = state.db.clone();
+    tokio::task::spawn_blocking(move || DockerManager::clean(request, &db))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 
