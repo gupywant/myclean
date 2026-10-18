@@ -116,6 +116,10 @@ pub struct ScanItem {
     pub name: String,
     pub category: ScanCategory,
     pub size_bytes: u64,
+    #[serde(default)]
+    pub allocated_bytes: u64,
+    #[serde(default)]
+    pub logical_bytes: u64,
     pub file_count: usize,
     pub modified_at: Option<String>,
     pub description: String,
@@ -123,6 +127,16 @@ pub struct ScanItem {
     pub is_selected: bool,
     #[serde(default)]
     pub classification: RiskClassification,
+    #[serde(default)]
+    pub detection_rule_id: String,
+    #[serde(default)]
+    pub disposable_reason: String,
+    #[serde(default)]
+    pub is_eligible_for_cleanup: bool,
+    #[serde(default)]
+    pub ineligibility_reason: Option<String>,
+    #[serde(default)]
+    pub associated_app: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -166,6 +180,125 @@ pub struct ScanResult {
 pub struct Scanner;
 
 impl Scanner {
+    /// Evaluates rule-based classification, disposable justification, and running application safety.
+    pub fn classify_candidate_rule(
+        category: ScanCategory,
+        path: &Path,
+    ) -> (String, String, RiskClassification, bool, Option<String>, Option<String>) {
+        // 1. Mandatory safety exclusion check
+        if SafetyGuard::is_mandatory_exclusion(path) {
+            return (
+                "RULE_MANDATORY_EXCLUSION".into(),
+                "Path is strictly protected by macOS System Integrity Protection or user privacy policy.".into(),
+                RiskClassification::Protected,
+                false,
+                Some("Protected by system integrity guardrail".into()),
+                None,
+            );
+        }
+
+        // 2. Database or persistent preferences check
+        if SafetyGuard::is_database_or_persistent_state(path) {
+            return (
+                "RULE_DATABASE_PROTECTED".into(),
+                "Contains persistent database, login credentials, or user preferences.".into(),
+                RiskClassification::Protected,
+                false,
+                Some("Persistent database or preference store cannot be automatically cleaned".into()),
+                None,
+            );
+        }
+
+        // 3. Active application running check
+        let running_app = SafetyGuard::detect_running_application(path);
+        if let Some(ref app) = running_app {
+            return (
+                "RULE_ACTIVE_APP_RUNNING".into(),
+                format!("Belongs to active application '{}'. Cleaning while running causes corruption or lock conflicts.", app),
+                RiskClassification::ReviewRequired,
+                false,
+                Some(format!("Application '{}' is currently running. Please quit it first.", app)),
+                running_app,
+            );
+        }
+
+        // 4. Rule-based classification for supported categories
+        match category {
+            ScanCategory::SystemCaches => (
+                "RULE_SYSTEM_APP_CACHE".into(),
+                "Transient application assets and response buffers. Applications automatically regenerate them upon next launch.".into(),
+                RiskClassification::SafeToClean,
+                true,
+                None,
+                None,
+            ),
+            ScanCategory::BrowserCaches => (
+                "RULE_BROWSER_WEB_CACHE".into(),
+                "Temporary web page assets, media fragments, and decoded fonts. Browsing history, passwords, cookies, and bookmarks are strictly preserved.".into(),
+                RiskClassification::SafeToClean,
+                true,
+                None,
+                None,
+            ),
+            ScanCategory::ApplicationLogs => (
+                "RULE_APPLICATION_LOGS".into(),
+                "Outdated diagnostic logs, historical error output, and crash reports no longer needed for active debugging.".into(),
+                RiskClassification::SafeToClean,
+                true,
+                None,
+                None,
+            ),
+            ScanCategory::DeveloperXcode => (
+                "RULE_XCODE_DERIVED_DATA".into(),
+                "Xcode intermediate module caches, build products, and symbol indexing data. Safely regenerated when you rebuild Xcode projects.".into(),
+                RiskClassification::SafeToClean,
+                true,
+                None,
+                None,
+            ),
+            ScanCategory::DeveloperCaches => (
+                "RULE_DEV_TOOLING_CACHE".into(),
+                "Package manager tarballs and bottle archives (Homebrew, Cargo, npm, Yarn, pnpm). Can be re-downloaded from registries on demand.".into(),
+                RiskClassification::SafeToClean,
+                true,
+                None,
+                None,
+            ),
+            ScanCategory::MessagingCaches => (
+                "RULE_MESSAGING_APP_CACHE".into(),
+                "Locally cached media previews, avatars, and audio thumbnails. Chat messages and attachments remain securely preserved on server.".into(),
+                RiskClassification::SafeToClean,
+                true,
+                None,
+                None,
+            ),
+            ScanCategory::UserTrash => (
+                "RULE_USER_TRASH_BIN".into(),
+                "Files and folders currently in your macOS Trash bin taking up allocated storage.".into(),
+                RiskClassification::SafeToClean,
+                true,
+                None,
+                None,
+            ),
+            ScanCategory::MailDownloads => (
+                "RULE_MAIL_PREVIEW_ATTACHMENTS".into(),
+                "Locally cached email attachments opened in QuickLook or Preview. The original emails and attachments remain intact on your mail server.".into(),
+                RiskClassification::SafeToClean,
+                true,
+                None,
+                None,
+            ),
+            ScanCategory::LargeFiles => (
+                "RULE_LARGE_USER_FILES".into(),
+                "High-capacity user files exceeding size threshold. Never deleted automatically; requires individual review.".into(),
+                RiskClassification::ReviewRequired,
+                false,
+                Some("Explicit user review required before trashing large files".into()),
+                None,
+            ),
+        }
+    }
+
     /// Calculate size and file count of a directory or single file without following external symlinks
     pub fn measure_path<P: AsRef<Path>>(path: P) -> (u64, usize) {
         let mut visited = HashSet::new();
@@ -174,31 +307,30 @@ impl Scanner {
         Self::measure_path_advanced(path, &mut visited, &mut skipped, &[], &cancel)
     }
 
-    /// Advanced path measurement supporting hard-link deduplication, symlink safety,
-    /// filesystem boundary checks, and permission error capture.
-    pub fn measure_path_advanced<P: AsRef<Path>>(
+    /// Measures path returning both allocated bytes, logical bytes, and file count.
+    pub fn measure_path_detailed<P: AsRef<Path>>(
         path: P,
         visited_inodes: &mut HashSet<(u64, u64)>,
         skipped_paths: &mut Vec<SkippedPath>,
         user_exclusions: &[String],
         cancel_token: &AtomicBool,
-    ) -> (u64, usize) {
+    ) -> (u64, u64, usize) {
         let p = path.as_ref();
         if !p.exists() {
-            return (0, 0);
+            return (0, 0, 0);
         }
 
         // Check user exclusions
         let path_str = p.to_string_lossy();
         for excl in user_exclusions {
             if path_str.starts_with(excl) {
-                return (0, 0);
+                return (0, 0, 0);
             }
         }
 
         // Check mandatory safety exclusion
         if SafetyGuard::is_mandatory_exclusion(p) {
-            return (0, 0);
+            return (0, 0, 0);
         }
 
         if p.is_file() || p.is_symlink() {
@@ -209,19 +341,22 @@ impl Scanner {
                         path: path_str.to_string(),
                         reason: e.to_string(),
                     });
-                    return (0, 0);
+                    return (0, 0, 0);
                 }
             };
+
+            let alloc = meta.blocks() * 512;
+            let logical = meta.len();
 
             // Hard-link deduplication for individual files
             if meta.nlink() > 1 {
                 let key = (meta.dev(), meta.ino());
                 if !visited_inodes.insert(key) {
-                    return (0, 1); // File exists but bytes already accounted for
+                    return (0, 0, 1); // File exists but bytes already accounted for
                 }
             }
 
-            return (meta.len(), 1);
+            return (alloc, logical, 1);
         }
 
         let root_meta = match p.symlink_metadata() {
@@ -231,12 +366,13 @@ impl Scanner {
                     path: path_str.to_string(),
                     reason: e.to_string(),
                 });
-                return (0, 0);
+                return (0, 0, 0);
             }
         };
         let root_dev = root_meta.dev();
 
-        let mut total_size = 0u64;
+        let mut total_allocated = 0u64;
+        let mut total_logical = 0u64;
         let mut file_count = 0usize;
 
         // WalkDir with follow_links(false)
@@ -274,7 +410,6 @@ impl Scanner {
             let meta = match ep.symlink_metadata() {
                 Ok(m) => m,
                 Err(err) => {
-                    // Handle files modified or deleted during scan
                     skipped_paths.push(SkippedPath {
                         path: ep.to_string_lossy().to_string(),
                         reason: err.to_string(),
@@ -290,7 +425,8 @@ impl Scanner {
 
             // If symlink, record size of the link itself, never follow external path
             if meta.file_type().is_symlink() {
-                total_size += meta.len();
+                total_allocated += meta.blocks() * 512;
+                total_logical += meta.len();
                 file_count += 1;
                 continue;
             }
@@ -303,16 +439,37 @@ impl Scanner {
                 // Hard-link deduplication
                 if nlink > 1 {
                     if visited_inodes.insert((dev, ino)) {
-                        total_size += meta.len();
+                        total_allocated += meta.blocks() * 512;
+                        total_logical += meta.len();
                     }
                 } else {
-                    total_size += meta.len();
+                    total_allocated += meta.blocks() * 512;
+                    total_logical += meta.len();
                 }
                 file_count += 1;
             }
         }
 
-        (total_size, file_count)
+        (total_allocated, total_logical, file_count)
+    }
+
+    /// Advanced path measurement supporting hard-link deduplication, symlink safety,
+    /// filesystem boundary checks, and permission error capture.
+    pub fn measure_path_advanced<P: AsRef<Path>>(
+        path: P,
+        visited_inodes: &mut HashSet<(u64, u64)>,
+        skipped_paths: &mut Vec<SkippedPath>,
+        user_exclusions: &[String],
+        cancel_token: &AtomicBool,
+    ) -> (u64, usize) {
+        let (_alloc, logical, count) = Self::measure_path_detailed(
+            path,
+            visited_inodes,
+            skipped_paths,
+            user_exclusions,
+            cancel_token,
+        );
+        (logical, count)
     }
 
     /// Fast parallel scanner inspecting system caches, developer artifacts, logs, and trash
@@ -485,7 +642,7 @@ impl Scanner {
             let mut visited_inodes = HashSet::new();
             let mut skipped_paths = Vec::new();
 
-            let (size_bytes, file_count) = Self::measure_path_advanced(
+            let (allocated_bytes, logical_bytes, file_count) = Self::measure_path_detailed(
                 &path,
                 &mut visited_inodes,
                 &mut skipped_paths,
@@ -498,7 +655,7 @@ impl Scanner {
                 skipped_lock.extend(skipped_paths);
             }
 
-            if size_bytes > 0 {
+            if allocated_bytes > 0 || logical_bytes > 0 {
                 let name = path
                     .file_name()
                     .map(|n| n.to_string_lossy().to_string())
@@ -510,27 +667,35 @@ impl Scanner {
                     .and_then(|m| m.modified().ok())
                     .map(|t| chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339());
 
-                let classification = category.default_classification();
+                let (detection_rule_id, disposable_reason, classification, is_eligible_for_cleanup, ineligibility_reason, associated_app) =
+                    Self::classify_candidate_rule(category, &path);
 
                 let item = ScanItem {
                     id,
                     path: path.to_string_lossy().to_string(),
                     name,
                     category,
-                    size_bytes,
+                    size_bytes: allocated_bytes,
+                    allocated_bytes,
+                    logical_bytes,
                     file_count,
                     modified_at,
                     description: desc.to_string(),
                     is_safe_to_clean: classification == RiskClassification::SafeToClean,
-                    is_selected: classification == RiskClassification::SafeToClean,
+                    is_selected: is_eligible_for_cleanup && classification == RiskClassification::SafeToClean,
                     classification,
+                    detection_rule_id,
+                    disposable_reason,
+                    is_eligible_for_cleanup,
+                    ineligibility_reason,
+                    associated_app,
                 };
 
                 let mut list = items_collector.lock().unwrap();
                 list.push(item);
 
                 let mut bytes = running_bytes.lock().unwrap();
-                *bytes += size_bytes;
+                *bytes += allocated_bytes;
             }
 
             let mut count = scanned_count.lock().unwrap();
@@ -587,22 +752,32 @@ impl Scanner {
                     let p = entry.path();
                     if p.is_file() {
                         if let Ok(meta) = p.symlink_metadata() {
-                            let len = meta.len();
-                            if len >= threshold_bytes {
+                            let alloc = meta.blocks() * 512;
+                            let logical = meta.len();
+                            if logical >= threshold_bytes || alloc >= threshold_bytes {
                                 let name = p.file_name().unwrap_or_default().to_string_lossy().to_string();
                                 let modified_at = meta.modified().ok().map(|t| chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339());
+                                let (detection_rule_id, disposable_reason, classification, is_eligible_for_cleanup, ineligibility_reason, associated_app) =
+                                    Self::classify_candidate_rule(ScanCategory::LargeFiles, p);
                                 let item = ScanItem {
                                     id: format!("large:{}", p.to_string_lossy()),
                                     path: p.to_string_lossy().to_string(),
                                     name,
                                     category: ScanCategory::LargeFiles,
-                                    size_bytes: len,
+                                    size_bytes: alloc,
+                                    allocated_bytes: alloc,
+                                    logical_bytes: logical,
                                     file_count: 1,
                                     modified_at,
                                     description: "Large file located in Downloads folder".into(),
                                     is_safe_to_clean: false, // Large files strictly require manual review
                                     is_selected: false,
-                                    classification: RiskClassification::ReviewRequired,
+                                    classification,
+                                    detection_rule_id,
+                                    disposable_reason,
+                                    is_eligible_for_cleanup,
+                                    ineligibility_reason,
+                                    associated_app,
                                 };
                                 let mut list = items_collector.lock().unwrap();
                                 list.push(item);

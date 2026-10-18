@@ -20,6 +20,8 @@ pub enum SafetyError {
     PermanentDeletionDisabled,
     #[error("Path is whitelisted by user configuration: {0}")]
     Whitelisted(String),
+    #[error("Target path contains persistent database or application state: {0}")]
+    DatabaseOrPersistentState(String),
     #[error("Filesystem IO error: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -230,12 +232,61 @@ impl SafetyGuard {
         false
     }
 
+    /// Detects if a path points to an application database, persistent preferences,
+    /// or session credential store that must never be modified by automated cleanup.
+    pub fn is_database_or_persistent_state<P: AsRef<Path>>(path: P) -> bool {
+        let p = path.as_ref();
+        let path_str = p.to_string_lossy();
+
+        // 1. Critical persistent directories
+        if path_str.contains("/Library/Preferences")
+            || path_str.contains("/Library/Keychains")
+            || path_str.contains("/Library/Accounts")
+            || path_str.contains("/Session Storage")
+            || path_str.contains("/IndexedDB")
+        {
+            return true;
+        }
+
+        // 2. Sensitive database & preference extensions
+        if let Some(ext) = p.extension().and_then(|e| e.to_str()) {
+            let ext_lower = ext.to_lowercase();
+            if ext_lower == "db"
+                || ext_lower == "sqlite"
+                || ext_lower == "sqlite3"
+                || ext_lower == "db-wal"
+                || ext_lower == "db-shm"
+            {
+                return true;
+            }
+        }
+
+        // 3. Known critical browser & system state filenames
+        if let Some(file_name) = p.file_name().and_then(|f| f.to_str()) {
+            let fn_lower = file_name.to_lowercase();
+            if fn_lower == "cookies"
+                || fn_lower == "cookies.binarycookies"
+                || fn_lower == "bookmarks.plist"
+                || fn_lower == "history.db"
+                || fn_lower == "history"
+                || fn_lower == "login data"
+                || fn_lower == "web data"
+                || fn_lower == "preferences"
+                || fn_lower == "keychain-2.db"
+            {
+                return true;
+            }
+        }
+
+        false
+    }
+
     /// Inspects running processes to prevent race conditions or database corruption
     /// caused by deleting files of an actively running macOS application.
     pub fn detect_running_application(path: &Path) -> Option<String> {
         let path_str = path.to_string_lossy().to_lowercase();
 
-        // Identify common high-stakes desktop application signatures
+        // Identify common desktop application signatures
         let app_target: Option<String> = if path_str.contains("chrome") || path_str.contains("google/chrome") {
             Some("Google Chrome".to_string())
         } else if path_str.contains("slack") {
@@ -248,6 +299,24 @@ impl SafetyGuard {
             Some("firefox".to_string())
         } else if path_str.contains("brave") {
             Some("Brave Browser".to_string())
+        } else if path_str.contains("edge") || path_str.contains("microsoft edge") {
+            Some("Microsoft Edge".to_string())
+        } else if path_str.contains("telegram") {
+            Some("Telegram".to_string())
+        } else if path_str.contains("discord") {
+            Some("Discord".to_string())
+        } else if path_str.contains("teams") {
+            Some("Microsoft Teams".to_string())
+        } else if path_str.contains("spotify") {
+            Some("Spotify".to_string())
+        } else if path_str.contains("cursor") {
+            Some("Cursor".to_string())
+        } else if path_str.contains("code") {
+            Some("Code".to_string())
+        } else if path_str.contains("safari") {
+            Some("Safari".to_string())
+        } else if path_str.contains("mail") {
+            Some("Mail".to_string())
         } else if path_str.ends_with(".app") {
             path.file_stem().map(|s| s.to_string_lossy().to_string())
         } else {
@@ -268,6 +337,60 @@ impl SafetyGuard {
         }
 
         None
+    }
+
+    /// Batch inspects running applications for a list of candidate cleanup paths.
+    /// Returns a deduplicated list of active application names.
+    pub fn detect_running_applications_for_paths(paths: &[&Path]) -> Vec<String> {
+        let mut sys = System::new();
+        sys.refresh_processes(ProcessesToUpdate::All, true);
+
+        let mut running_apps = Vec::new();
+
+        for path in paths {
+            let path_str = path.to_string_lossy().to_lowercase();
+            let app_target: Option<&str> = if path_str.contains("chrome") {
+                Some("Google Chrome")
+            } else if path_str.contains("slack") {
+                Some("Slack")
+            } else if path_str.contains("xcode") {
+                Some("Xcode")
+            } else if path_str.contains("docker") {
+                Some("Docker")
+            } else if path_str.contains("firefox") {
+                Some("firefox")
+            } else if path_str.contains("brave") {
+                Some("Brave Browser")
+            } else if path_str.contains("edge") {
+                Some("Microsoft Edge")
+            } else if path_str.contains("telegram") {
+                Some("Telegram")
+            } else if path_str.contains("discord") {
+                Some("Discord")
+            } else if path_str.contains("teams") {
+                Some("Microsoft Teams")
+            } else if path_str.contains("spotify") {
+                Some("Spotify")
+            } else {
+                None
+            };
+
+            if let Some(target) = app_target {
+                if !running_apps.iter().any(|a: &String| a.eq_ignore_ascii_case(target)) {
+                    for proc in sys.processes().values() {
+                        let proc_name = proc.name().to_string_lossy();
+                        if proc_name.eq_ignore_ascii_case(target)
+                            || proc_name.to_lowercase().contains(&target.to_lowercase())
+                        {
+                            running_apps.push(target.to_string());
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        running_apps
     }
 
     /// Verifies that a path is safe for cleaning. Returns Err(SafetyError) if unsafe.
@@ -299,12 +422,17 @@ impl SafetyGuard {
             }
         }
 
-        // 4. Git tree protection: never touch active git repositories
+        // 4. Database & persistent state protection
+        if Self::is_database_or_persistent_state(p) || Self::is_database_or_persistent_state(&canonical) {
+            return Err(SafetyError::DatabaseOrPersistentState(canonical_str));
+        }
+
+        // 5. Git tree protection: never touch active git repositories
         if canonical_str.contains("/.git/objects") || canonical_str.contains("/.git/refs") || canonical_str.contains("/.git/HEAD") {
             return Err(SafetyError::UserProtected("Protected active Git repository data".into()));
         }
 
-        // 5. System protected check
+        // 6. System protected check
         if Self::is_system_protected(p) || Self::is_system_protected(&canonical) {
             return Err(SafetyError::SystemProtected(canonical_str));
         }
@@ -412,6 +540,16 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&temp_dir);
         let _ = std::fs::remove_file(&outside_file);
+    }
+
+    #[test]
+    fn test_database_or_persistent_state_protection() {
+        assert!(SafetyGuard::is_database_or_persistent_state(Path::new("/Users/user/Library/Safari/History.db")));
+        assert!(SafetyGuard::is_database_or_persistent_state(Path::new("/Users/user/Library/Safari/Bookmarks.plist")));
+        assert!(SafetyGuard::is_database_or_persistent_state(Path::new("/Users/user/Library/Application Support/Google/Chrome/Default/Cookies")));
+        assert!(SafetyGuard::is_database_or_persistent_state(Path::new("/Users/user/Library/Application Support/Slack/IndexedDB")));
+        assert!(SafetyGuard::is_database_or_persistent_state(Path::new("/Users/user/Library/Preferences/com.apple.finder.plist")));
+        assert!(!SafetyGuard::is_database_or_persistent_state(Path::new("/Users/user/Library/Caches/Google/Chrome/data_0")));
     }
 }
 
