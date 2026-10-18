@@ -886,4 +886,76 @@ mod tests {
         let result = Scanner::scan(cancel, |_prog| {});
         assert!(result.was_cancelled);
     }
+
+    #[test]
+    fn test_classify_candidate_rule_system_cache() {
+        let path = Path::new("/Users/user/Library/Caches/com.apple.dt.Xcode");
+        let (rule_id, desc, risk, eligible, inelig_reason, _) =
+            Scanner::classify_candidate_rule(ScanCategory::SystemCaches, path);
+        assert_eq!(rule_id, "RULE_SYSTEM_APP_CACHE");
+        assert_eq!(risk, RiskClassification::SafeToClean);
+        assert!(eligible);
+        assert!(inelig_reason.is_none());
+        assert!(!desc.is_empty());
+    }
+
+    #[test]
+    fn test_classify_candidate_rule_database_protection() {
+        let path = Path::new("/Users/user/Library/Caches/com.example.app/local_state.sqlite");
+        let (rule_id, _desc, risk, eligible, inelig_reason, _) =
+            Scanner::classify_candidate_rule(ScanCategory::SystemCaches, path);
+        assert_eq!(rule_id, "RULE_DATABASE_PROTECTED");
+        assert_eq!(risk, RiskClassification::Protected);
+        assert!(!eligible);
+        assert!(inelig_reason.is_some());
+    }
+
+    #[test]
+    fn test_classify_candidate_rule_large_files_review_required() {
+        let path = Path::new("/Users/user/Downloads/big_installer.pkg");
+        let (rule_id, _desc, risk, eligible, inelig_reason, _) =
+            Scanner::classify_candidate_rule(ScanCategory::LargeFiles, path);
+        assert_eq!(rule_id, "RULE_LARGE_USER_FILES");
+        assert_eq!(risk, RiskClassification::ReviewRequired);
+        assert!(!eligible); // Requires explicit individual user confirmation
+        assert!(inelig_reason.is_some());
+    }
+
+    #[test]
+    fn test_classify_candidate_rule_system_protected_rejection() {
+        let path = Path::new("/System/Library/Caches");
+        let (rule_id, _desc, risk, eligible, inelig_reason, _) =
+            Scanner::classify_candidate_rule(ScanCategory::SystemCaches, path);
+        assert_eq!(rule_id, "RULE_MANDATORY_EXCLUSION");
+        assert_eq!(risk, RiskClassification::Protected);
+        assert!(!eligible);
+        assert!(inelig_reason.is_some());
+    }
+
+    #[test]
+    fn test_measure_path_detailed_allocated_vs_logical() {
+        let temp = std::env::temp_dir().join("myclean_measure_detailed_test");
+        let _ = std::fs::remove_dir_all(&temp);
+        std::fs::create_dir_all(&temp).unwrap();
+
+        let test_file = temp.join("test.bin");
+        std::fs::write(&test_file, vec![0u8; 1024]).unwrap();
+
+        let mut visited = HashSet::new();
+        let mut skipped = Vec::new();
+        let cancel = AtomicBool::new(false);
+        let (alloc, logical, count) = Scanner::measure_path_detailed(
+            &temp,
+            &mut visited,
+            &mut skipped,
+            &[],
+            &cancel,
+        );
+
+        assert!(alloc > 0);
+        assert_eq!(logical, 1024);
+        assert_eq!(count, 1);
+
+        let _ = std::fs::remove_dir_all(&temp);
+    }
 }
