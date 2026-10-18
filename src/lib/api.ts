@@ -19,6 +19,12 @@ import type {
   OrphanedScanResult,
   UninstallAppRequest,
   CleanOrphanedRequest,
+  DeveloperScanResult,
+  DeveloperArtifactItem,
+  DeveloperCleanRequest,
+  DockerScanResult,
+  DockerCleanRequest,
+  DockerCleanResult,
 } from "../types";
 
 export const isTauriEnvironment = (): boolean => {
@@ -608,6 +614,260 @@ export const api = {
   async cancelStorageAnalysis(): Promise<boolean> {
     if (!isTauriEnvironment()) return true;
     return invoke<boolean>("cancel_storage_analysis");
+  },
+
+  async scanDeveloperSpaces(workspaces?: string[]): Promise<DeveloperScanResult> {
+    if (!isTauriEnvironment()) {
+      await new Promise((r) => setTimeout(r, 600));
+      return {
+        total_bytes: 8450000000,
+        total_allocated_bytes: 8460000000,
+        items: [
+          {
+            id: "xcode_myproject",
+            provider_id: "xcode_derived_data",
+            provider_name: "Xcode DerivedData",
+            category: "xcode",
+            display_name: "Xcode DerivedData — myclean-app",
+            path: "/Users/user/Library/Developer/Xcode/DerivedData/myclean-gpyxyz",
+            size_bytes: 3850000000,
+            allocated_bytes: 3855000000,
+            item_count: 4210,
+            modified_at: new Date(Date.now() - 3600000 * 2).toISOString(),
+            risk: {
+              level: "Safe",
+              title: "Safe Build Cache",
+              reason: "Intermediate compiler artifacts and indexing symbols. Safe to purge.",
+              rebuild_instructions: "Press Cmd+B in Xcode to rebuild.",
+            },
+            is_selected: true,
+            is_eligible: true,
+          },
+          {
+            id: "brew_downloads",
+            provider_id: "homebrew_cache",
+            provider_name: "Homebrew Bottle Caches",
+            category: "homebrew",
+            display_name: "Homebrew Downloaded Bottles",
+            path: "/Users/user/Library/Caches/Homebrew/downloads",
+            size_bytes: 2400000000,
+            allocated_bytes: 2400000000,
+            item_count: 32,
+            modified_at: new Date(Date.now() - 86400000).toISOString(),
+            risk: {
+              level: "Safe",
+              title: "Safe Package Cache",
+              reason: "Pre-compiled formula tarballs. Homebrew automatically re-downloads as needed.",
+              rebuild_instructions: "Re-downloaded automatically during 'brew upgrade'.",
+            },
+            is_selected: true,
+            is_eligible: true,
+          },
+          {
+            id: "cargo_registry_cache",
+            provider_id: "cargo_cache",
+            provider_name: "Cargo Registry & Git Cache",
+            category: "cargo",
+            display_name: "Cargo Registry .crate Cache",
+            path: "/Users/user/.cargo/registry/cache",
+            size_bytes: 1200000000,
+            allocated_bytes: 1200000000,
+            item_count: 512,
+            modified_at: new Date(Date.now() - 86400000 * 3).toISOString(),
+            risk: {
+              level: "Safe",
+              title: "Safe Crate Archives",
+              reason: "Cached .crate archives. Re-downloaded during 'cargo build'.",
+              rebuild_instructions: "Cargo automatically downloads dependencies on compile.",
+            },
+            is_selected: true,
+            is_eligible: true,
+          },
+          {
+            id: "npm_cacache",
+            provider_id: "npm_cache",
+            provider_name: "npm Package Cache",
+            category: "npm",
+            display_name: "npm Global Package Cache (_cacache)",
+            path: "/Users/user/.npm/_cacache",
+            size_bytes: 1000000000,
+            allocated_bytes: 1000000000,
+            item_count: 3100,
+            modified_at: new Date(Date.now() - 86400000 * 4).toISOString(),
+            risk: {
+              level: "Safe",
+              title: "Safe Package Cache",
+              reason: "npm content-addressable package archive.",
+              rebuild_instructions: "npm re-fetches packages during 'npm install'.",
+            },
+            is_selected: true,
+            is_eligible: true,
+          },
+        ],
+        detected_providers: ["xcode_derived_data", "homebrew_cache", "cargo_cache", "npm_cache"],
+        warnings: [],
+      };
+    }
+    return invoke<DeveloperScanResult>("scan_developer_spaces", { workspaces });
+  },
+
+  async cancelDeveloperScan(): Promise<boolean> {
+    if (!isTauriEnvironment()) return true;
+    return invoke<boolean>("cancel_developer_scan");
+  },
+
+  async inspectDeveloperWorkspace(workspacePath: string): Promise<DeveloperArtifactItem[]> {
+    if (!isTauriEnvironment()) {
+      return [
+        {
+          id: `ws_target_${workspacePath}`,
+          provider_id: "workspace_artifacts",
+          provider_name: "Project Workspace Artifacts",
+          category: "rust_target",
+          display_name: `${workspacePath} — target/ (Rust)`,
+          path: `${workspacePath}/target`,
+          size_bytes: 2500000000,
+          allocated_bytes: 2510000000,
+          item_count: 850,
+          modified_at: new Date().toISOString(),
+          risk: {
+            level: "ReviewRequired",
+            title: "Rust Build Output",
+            reason: "Compiled binary artifacts and compiler cache.",
+            rebuild_instructions: `cd ${workspacePath} && cargo build`,
+          },
+          is_selected: false,
+          is_eligible: true,
+        },
+      ];
+    }
+    return invoke<DeveloperArtifactItem[]>("inspect_developer_workspace", { workspacePath });
+  },
+
+  async cleanDeveloperArtifacts(
+    request: DeveloperCleanRequest,
+    workspaces?: string[]
+  ): Promise<CleanResult> {
+    if (!isTauriEnvironment()) {
+      await new Promise((r) => setTimeout(r, 600));
+      return {
+        success: true,
+        dry_run: request.dry_run,
+        bytes_freed: request.paths.length * 1250000000,
+        bytes_moved_to_trash: request.dry_run ? 0 : request.paths.length * 1250000000,
+        items_deleted: request.paths.length,
+        items_skipped: 0,
+        items_failed: 0,
+        errors: [],
+        duration_ms: 380,
+        was_cancelled: false,
+      };
+    }
+    return invoke<CleanResult>("clean_developer_artifacts", { request, workspaces });
+  },
+
+  async inspectDocker(): Promise<DockerScanResult> {
+    if (!isTauriEnvironment()) {
+      await new Promise((r) => setTimeout(r, 700));
+      return {
+        status: {
+          cli_available: true,
+          cli_path: "/usr/local/bin/docker",
+          cli_version: "29.8.2",
+          daemon_running: false,
+          daemon_version: null,
+          daemon_error: "Docker Desktop daemon is stopped or Docker socket is unreachable.",
+          health_warning: null,
+          can_cleanup: false,
+        },
+        summary: {
+          images_size_bytes: 14500000000,
+          images_reclaimable_bytes: 4200000000,
+          images_count: 8,
+          containers_size_bytes: 420000000,
+          containers_reclaimable_bytes: 420000000,
+          containers_count: 4,
+          volumes_size_bytes: 8500000000,
+          volumes_count: 3,
+          build_cache_size_bytes: 3200000000,
+          build_cache_reclaimable_bytes: 3200000000,
+          build_cache_count: 12,
+          total_size_bytes: 26620000000,
+          total_reclaimable_bytes: 7820000000,
+        },
+        resources: [
+          {
+            id: "7a8b9c0d1e2f",
+            name: "Container: myclean-dev-redis",
+            resource_type: "stopped_container",
+            size_bytes: 110000000,
+            reclaimable: true,
+            created_at: "2 hours ago",
+            status: "Exited (0) 45 minutes ago",
+            explanation: "Stopped container 'myclean-dev-redis'. Safely removable.",
+            dependencies: ["Image: redis:7-alpine"],
+            is_protected: false,
+          },
+          {
+            id: "d9e8f7a6b5c4",
+            name: "Dangling Image <none> (d9e8f7a6)",
+            resource_type: "dangling_image",
+            size_bytes: 850000000,
+            reclaimable: true,
+            created_at: "3 days ago",
+            status: "Dangling Layer",
+            explanation: "Untagged intermediate build image layer. Safe to prune.",
+            dependencies: [],
+            is_protected: false,
+          },
+          {
+            id: "docker_build_cache",
+            name: "Docker Build Cache & Layers",
+            resource_type: "build_cache",
+            size_bytes: 3200000000,
+            reclaimable: true,
+            created_at: "Dynamic",
+            status: "Disposable Cache",
+            explanation: "BuildKit intermediate compiler layers and build caches.",
+            dependencies: [],
+            is_protected: false,
+          },
+          {
+            id: "vol_postgres_data",
+            name: "Volume: postgres_data",
+            resource_type: "volume",
+            size_bytes: 8500000000,
+            reclaimable: false,
+            created_at: "Persistent",
+            status: "Driver: local (Protected)",
+            explanation: "Docker volumes contain persistent database storage. Protected by default.",
+            dependencies: [],
+            is_protected: true,
+          },
+        ],
+      };
+    }
+    return invoke<DockerScanResult>("inspect_docker");
+  },
+
+  async cleanDockerResources(request: DockerCleanRequest): Promise<DockerCleanResult> {
+    if (!isTauriEnvironment()) {
+      await new Promise((r) => setTimeout(r, 600));
+      return {
+        success: true,
+        dry_run: request.dry_run,
+        bytes_freed: 2450000000,
+        items_deleted: request.resource_ids.length,
+        errors: [],
+        details: [
+          "[Dry Run] Would prune build cache",
+          "[Dry Run] Would remove stopped container 7a8b9c0d1e2f",
+        ],
+        disclaimer:
+          "Docker resources were pruned via native CLI. Host APFS disk reclamation occurs progressively as Docker Desktop compacts its virtual disk.",
+      };
+    }
+    return invoke<DockerCleanResult>("clean_docker_resources", { request });
   },
 
   async openInFinder(path: string): Promise<void> {

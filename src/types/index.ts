@@ -385,3 +385,120 @@ export interface CleanResult {
   duration_ms: number;
   was_cancelled: boolean;
 }
+
+// ---------------------------------------------------------------------------
+// Developer Space & Provider Types
+// ---------------------------------------------------------------------------
+export type DeveloperRiskLevel = "Safe" | "ReviewRequired" | "Protected";
+
+export interface RiskExplanation {
+  level: DeveloperRiskLevel;
+  title: string;
+  reason: string;
+  rebuild_instructions?: string | null;
+}
+
+export interface DeveloperArtifactItem {
+  id: string;
+  provider_id: string;
+  provider_name: string;
+  category: string;
+  display_name: string;
+  path: string;
+  size_bytes: number;
+  allocated_bytes: number;
+  item_count: number;
+  modified_at: string | null;
+  risk: RiskExplanation;
+  is_selected: boolean;
+  is_eligible: boolean;
+}
+
+export interface DeveloperScanResult {
+  total_bytes: number;
+  total_allocated_bytes: number;
+  items: DeveloperArtifactItem[];
+  detected_providers: string[];
+  warnings: string[];
+}
+
+export interface DeveloperCleanRequest {
+  paths: string[];
+  dry_run: boolean;
+  confirmed: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Docker Studio & API Types
+// ---------------------------------------------------------------------------
+export interface DockerStatus {
+  cli_available: boolean;
+  cli_path?: string | null;
+  cli_version?: string | null;
+  daemon_running: boolean;
+  daemon_version?: string | null;
+  daemon_error?: string | null;
+  health_warning?: string | null;
+  can_cleanup: boolean;
+}
+
+export interface DockerStorageSummary {
+  images_size_bytes: number;
+  images_reclaimable_bytes: number;
+  images_count: number;
+  containers_size_bytes: number;
+  containers_reclaimable_bytes: number;
+  containers_count: number;
+  volumes_size_bytes: number;
+  volumes_count: number;
+  build_cache_size_bytes: number;
+  build_cache_reclaimable_bytes: number;
+  build_cache_count: number;
+  total_size_bytes: number;
+  total_reclaimable_bytes: number;
+}
+
+export type DockerResourceType =
+  | "dangling_image"
+  | "unused_image"
+  | "stopped_container"
+  | "build_cache"
+  | "unused_network"
+  | "volume";
+
+export interface DockerResource {
+  id: string;
+  name: string;
+  resource_type: DockerResourceType;
+  size_bytes: number;
+  reclaimable: boolean;
+  created_at: string;
+  status: string;
+  explanation: string;
+  dependencies: string[];
+  is_protected: boolean;
+}
+
+export interface DockerScanResult {
+  status: DockerStatus;
+  summary: DockerStorageSummary;
+  resources: DockerResource[];
+}
+
+export interface DockerCleanRequest {
+  resource_ids: string[];
+  resource_types: string[];
+  dry_run: boolean;
+  confirmed: boolean;
+}
+
+export interface DockerCleanResult {
+  success: boolean;
+  dry_run: boolean;
+  bytes_freed: number;
+  items_deleted: number;
+  errors: CleanErrorItem[];
+  details: string[];
+  disclaimer: string;
+}
+

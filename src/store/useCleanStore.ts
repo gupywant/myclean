@@ -20,6 +20,9 @@ import type {
   DuplicateScanProgress,
   DuplicateGroupCleanSelection,
   OrphanedScanResult,
+  DeveloperScanResult,
+  DockerScanResult,
+  DockerCleanResult,
 } from "../types";
 
 interface CleanState {
@@ -75,6 +78,23 @@ interface CleanState {
   appFilterQuery: string;
   appSortBy: "total_size" | "binary_size" | "name" | "recent";
 
+  // Developer & Docker Studio State
+  developerResult: DeveloperScanResult | null;
+  isDeveloperScanning: boolean;
+  developerSelectedPaths: Set<string>;
+  isDeveloperCleaning: boolean;
+  lastDeveloperCleanResult: CleanResult | null;
+  developerWorkspaces: string[];
+  developerActiveTab: "tool_caches" | "workspaces" | "docker";
+  showDeveloperCleanModal: boolean;
+
+  dockerResult: DockerScanResult | null;
+  isDockerInspecting: boolean;
+  dockerSelectedIds: Set<string>;
+  isDockerCleaning: boolean;
+  lastDockerCleanResult: DockerCleanResult | null;
+  showDockerCleanModal: boolean;
+
   // History & Whitelist
   scanHistory: ScanRecord[];
   cleanupHistory: CleanupRecord[];
@@ -128,6 +148,26 @@ interface CleanState {
   toggleOrphanedPathSelection: (path: string) => void;
   selectAllOrphanedPaths: (select: boolean) => void;
   executeCleanOrphaned: () => Promise<CleanResult | null>;
+
+  // Developer & Docker Studio Actions
+  scanDeveloperSpaces: (workspaces?: string[]) => Promise<void>;
+  cancelDeveloperScan: () => Promise<void>;
+  toggleDeveloperPathSelection: (path: string) => void;
+  selectAllDeveloperPaths: (select: boolean) => void;
+  cleanDeveloperArtifacts: (dryRun?: boolean) => Promise<CleanResult | null>;
+  addDeveloperWorkspace: (path: string) => void;
+  removeDeveloperWorkspace: (path: string) => void;
+  setDeveloperActiveTab: (tab: "tool_caches" | "workspaces" | "docker") => void;
+  openDeveloperCleanModal: () => void;
+  closeDeveloperCleanModal: () => void;
+
+  inspectDocker: () => Promise<void>;
+  toggleDockerResourceSelection: (id: string) => void;
+  selectAllDockerResources: (select: boolean) => void;
+  cleanDockerResources: (dryRun?: boolean) => Promise<DockerCleanResult | null>;
+  openDockerCleanModal: () => void;
+  closeDockerCleanModal: () => void;
+
   fetchHistory: () => Promise<void>;
   fetchWhitelist: () => Promise<void>;
   addWhitelist: (path: string, reason: string) => Promise<void>;
@@ -195,6 +235,22 @@ export const useCleanStore = create<CleanState>((set, get) => ({
   appActiveTab: "installed",
   appFilterQuery: "",
   appSortBy: "total_size",
+
+  developerResult: null,
+  isDeveloperScanning: false,
+  developerSelectedPaths: new Set<string>(),
+  isDeveloperCleaning: false,
+  lastDeveloperCleanResult: null,
+  developerWorkspaces: [],
+  developerActiveTab: "tool_caches",
+  showDeveloperCleanModal: false,
+
+  dockerResult: null,
+  isDockerInspecting: false,
+  dockerSelectedIds: new Set<string>(),
+  isDockerCleaning: false,
+  lastDockerCleanResult: null,
+  showDockerCleanModal: false,
 
   scanHistory: [],
   cleanupHistory: [],
@@ -896,6 +952,205 @@ export const useCleanStore = create<CleanState>((set, get) => ({
       return null;
     }
   },
+
+  // Developer Space Actions
+  scanDeveloperSpaces: async (workspaces?: string[]) => {
+    set({ isDeveloperScanning: true });
+    try {
+      const activeWorkspaces = workspaces ?? get().developerWorkspaces;
+      const res = await api.scanDeveloperSpaces(activeWorkspaces);
+      const selected = new Set<string>();
+      res.items.forEach((item) => {
+        if (item.is_selected) selected.add(item.path);
+      });
+      set({
+        developerResult: res,
+        developerSelectedPaths: selected,
+        isDeveloperScanning: false,
+      });
+    } catch (err) {
+      console.error("Developer scan error:", err);
+      set({ isDeveloperScanning: false });
+    }
+  },
+
+  cancelDeveloperScan: async () => {
+    await api.cancelDeveloperScan();
+    set({ isDeveloperScanning: false });
+  },
+
+  toggleDeveloperPathSelection: (path: string) => {
+    set((state) => {
+      const next = new Set(state.developerSelectedPaths);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
+      return { developerSelectedPaths: next };
+    });
+  },
+
+  selectAllDeveloperPaths: (select: boolean) => {
+    set((state) => {
+      if (select && state.developerResult) {
+        return {
+          developerSelectedPaths: new Set(
+            state.developerResult.items
+              .filter((i) => i.is_eligible)
+              .map((i) => i.path)
+          ),
+        };
+      }
+      return { developerSelectedPaths: new Set() };
+    });
+  },
+
+  cleanDeveloperArtifacts: async (dryRun?: boolean) => {
+    const { developerSelectedPaths, developerWorkspaces, dryRunMode } = get();
+    if (developerSelectedPaths.size === 0) return null;
+
+    const useDryRun = dryRun ?? dryRunMode;
+    set({ isDeveloperCleaning: true });
+    try {
+      const res = await api.cleanDeveloperArtifacts(
+        {
+          paths: Array.from(developerSelectedPaths),
+          dry_run: useDryRun,
+          confirmed: true,
+        },
+        developerWorkspaces
+      );
+
+      set({
+        lastDeveloperCleanResult: res,
+        isDeveloperCleaning: false,
+      });
+
+      if (!useDryRun && res.items_deleted > 0) {
+        get().scanDeveloperSpaces();
+        get().fetchSystemSummary();
+        get().fetchHistory();
+      }
+
+      return res;
+    } catch (err) {
+      console.error("Developer cleanup error:", err);
+      set({ isDeveloperCleaning: false });
+      return null;
+    }
+  },
+
+  addDeveloperWorkspace: (path: string) => {
+    set((state) => {
+      if (state.developerWorkspaces.includes(path)) return state;
+      const next = [...state.developerWorkspaces, path];
+      return { developerWorkspaces: next };
+    });
+    get().scanDeveloperSpaces();
+  },
+
+  removeDeveloperWorkspace: (path: string) => {
+    set((state) => ({
+      developerWorkspaces: state.developerWorkspaces.filter((p) => p !== path),
+    }));
+    get().scanDeveloperSpaces();
+  },
+
+  setDeveloperActiveTab: (tab) => set({ developerActiveTab: tab }),
+  openDeveloperCleanModal: () => set({ showDeveloperCleanModal: true }),
+  closeDeveloperCleanModal: () => set({ showDeveloperCleanModal: false }),
+
+  // Docker Studio Actions
+  inspectDocker: async () => {
+    set({ isDockerInspecting: true });
+    try {
+      const res = await api.inspectDocker();
+      const selected = new Set<string>();
+      res.resources.forEach((r) => {
+        if (r.reclaimable && !r.is_protected) {
+          selected.add(r.id);
+        }
+      });
+      set({
+        dockerResult: res,
+        dockerSelectedIds: selected,
+        isDockerInspecting: false,
+      });
+    } catch (err) {
+      console.error("Docker inspection error:", err);
+      set({ isDockerInspecting: false });
+    }
+  },
+
+  toggleDockerResourceSelection: (id: string) => {
+    set((state) => {
+      const next = new Set(state.dockerSelectedIds);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return { dockerSelectedIds: next };
+    });
+  },
+
+  selectAllDockerResources: (select: boolean) => {
+    set((state) => {
+      if (select && state.dockerResult) {
+        return {
+          dockerSelectedIds: new Set(
+            state.dockerResult.resources
+              .filter((r) => r.reclaimable && !r.is_protected)
+              .map((r) => r.id)
+          ),
+        };
+      }
+      return { dockerSelectedIds: new Set() };
+    });
+  },
+
+  cleanDockerResources: async (dryRun?: boolean) => {
+    const { dockerSelectedIds, dockerResult, dryRunMode } = get();
+    if (!dockerResult || dockerSelectedIds.size === 0) return null;
+
+    const useDryRun = dryRun ?? dryRunMode;
+    const selectedList = dockerResult.resources.filter((r) =>
+      dockerSelectedIds.has(r.id)
+    );
+
+    const resource_ids = selectedList.map((r) => r.id);
+    const resource_types = selectedList.map((r) => r.resource_type);
+
+    set({ isDockerCleaning: true });
+    try {
+      const res = await api.cleanDockerResources({
+        resource_ids,
+        resource_types,
+        dry_run: useDryRun,
+        confirmed: true,
+      });
+
+      set({
+        lastDockerCleanResult: res,
+        isDockerCleaning: false,
+      });
+
+      if (!useDryRun && res.items_deleted > 0) {
+        get().inspectDocker();
+        get().fetchHistory();
+      }
+
+      return res;
+    } catch (err) {
+      console.error("Docker cleanup error:", err);
+      set({ isDockerCleaning: false });
+      return null;
+    }
+  },
+
+  openDockerCleanModal: () => set({ showDockerCleanModal: true }),
+  closeDockerCleanModal: () => set({ showDockerCleanModal: false }),
 
   fetchHistory: async () => {
     try {

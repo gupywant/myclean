@@ -14,6 +14,8 @@ import { SettingsView } from "./components/settings/SettingsView";
 import { ConfirmCleanModal } from "./components/modals/ConfirmCleanModal";
 import { DuplicateConfirmModal } from "./components/modals/DuplicateConfirmModal";
 import { AppUninstallModal } from "./components/modals/AppUninstallModal";
+import { DeveloperCleanModal } from "./components/modals/DeveloperCleanModal";
+import { DockerCleanModal } from "./components/modals/DockerCleanModal";
 
 export const App: React.FC = () => {
   const { activeTab, fetchSystemSummary, fetchHistory } = useFluxStore();
@@ -51,6 +53,8 @@ export const App: React.FC = () => {
       <ConfirmCleanModal />
       <DuplicateConfirmModal />
       <AppUninstallModal />
+      <DeveloperCleanModal />
+      <DockerCleanModal />
     </div>
   );
 };
