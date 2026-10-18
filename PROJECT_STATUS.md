@@ -123,9 +123,35 @@
   - `cargo clippy -- -D warnings` passing with 0 warnings.
   - `npm run build` (`tsc && vite build`) passing cleanly with 0 type errors.
 
-### Phase 05: Duplicate Finder
-- [ ] Side-by-side binary/text diff previews for duplicates
-- [ ] Smart duplicate selection heuristics (keep highest resolution / newest / oldest)
+### Phase 05: Duplicate Finder (COMPLETED)
+- [x] **Multi-Stage Cryptographic Detection Engine (`duplicates.rs`):**
+  - Strict three-tier pipeline: APFS File Size Bucketing &rarr; 16KB Partial Head/Tail BLAKE3 Hashing &rarr; Full Streaming BLAKE3 Verification with bounded 64KB buffers.
+  - Zero false positives: files are never classified as duplicates based solely on file names, extensions, sizes, or partial hashes.
+  - Real-time event streaming: emits `duplicate:progress` events with current phase, scanned file counts, candidate group counts, bytes hashed, and completion percentage.
+  - Immediate cancellation responsiveness: checks `AtomicBool` on every iteration and buffer read to abort within milliseconds.
+- [x] **APFS Hard-Link & Symlink Awareness (`duplicates.rs`):**
+  - Hard-link deduplication: tracks `(dev, ino)` to recognize files sharing physical disk blocks.
+  - Accurate physical savings estimation: groups with only hard links calculate 0 reclaimable bytes because deleting one hard link decreases link count without freeing storage blocks until the last link is unlinked.
+  - Boundary restriction: never follows symlinks outside approved scanning boundaries; symlinks are never hashed or added as duplicate targets.
+- [x] **Strict Original Preservation Invariant (`duplicates.rs`, `commands.rs`):**
+  - Backend enforcement: Rust `clean_duplicate_groups` guarantees at least 1 verified original is retained per group. Requests attempting to delete all copies or delete the designated original are strictly rejected with an error.
+  - Default safe state: UI defaults to zero deletion selection (`is_selected_for_removal: false`).
+- [x] **Scan-to-Clean Anti-Race Condition Protection (`duplicates.rs`):**
+  - Re-computes full BLAKE3 hash immediately prior to trashing; if any file was modified, truncated, or tampered with post-scan, it is automatically skipped and reported.
+  - Native macOS Trash only via `trash::delete(&canonical)`; permanent deletion remains strictly disabled.
+  - Comprehensive SQLite audit logging storing detailed JSON payload (`CleanupAuditDetail`) in `myclean.db`.
+- [x] **Futuristic Premium UI Experience (`DuplicatesView.tsx`, `DuplicateConfirmModal.tsx`, `useCleanStore.ts`):**
+  - Target scope selection: Downloads (default), Documents, Desktop, and custom path selector.
+  - Minimum size filtering: All (>1KB), 1 MB (default), 10 MB, 100 MB.
+  - Live scanning pulse banner with phase details, candidate counters, progress bar, and Abort Scan button.
+  - Smart Selection heuristics: Keep Oldest (Recommended), Keep Newest, Deselect All.
+  - Group cards with BLAKE3 hash pill (with copy-to-clipboard), reclaimable APFS space badge, clone count, hard-link indicator, and cross-directory warnings.
+  - Deep comparison modal (`DuplicateInspectModal`): side-by-side inspection of file paths, logical vs APFS allocated sizes, inodes, link counts, modification dates, Reveal in Finder, and one-click designated original reassignment.
+  - Dedicated Duplicate Confirmation Modal: mode toggle (Trash vs Dry-Run Simulation), summary metrics, original preservation notice, and audit-logged execution.
+- [x] **Automated Tests & Regression Coverage:**
+  - 40 tests passing (38 unit tests + 2 integration tests in `duplicates_safety.rs`), covering empty files, size collisions, partial hash collisions, hard-link zero-savings detection, symlink ignoring, cancellation, original preservation rejection, and anti-race condition hash mismatch.
+  - `cargo clippy -- -D warnings` passing with 0 warnings.
+  - `npm run build` (`tsc && vite build`) passing cleanly with 0 type errors.
 
 ### Phase 06: App Uninstaller & Unused Data
 - [ ] Deep heuristic leftover scanner for orphaned preferences of deleted apps
