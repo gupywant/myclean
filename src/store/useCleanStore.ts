@@ -19,6 +19,7 @@ import type {
   CleanItemTarget,
   DuplicateScanProgress,
   DuplicateGroupCleanSelection,
+  OrphanedScanResult,
 } from "../types";
 
 interface CleanState {
@@ -60,6 +61,19 @@ interface CleanState {
   // Applications State
   installedApps: InstalledApp[];
   isAppsScanning: boolean;
+  orphanedResult: OrphanedScanResult | null;
+  isOrphanedScanning: boolean;
+  selectedAppForUninstall: InstalledApp | null;
+  selectedArtifactPaths: Set<string>;
+  isUninstalling: boolean;
+  showUninstallModal: boolean;
+  lastUninstallResult: CleanResult | null;
+  orphanedSelectedPaths: Set<string>;
+  isCleaningOrphaned: boolean;
+  lastOrphanedCleanResult: CleanResult | null;
+  appActiveTab: "installed" | "orphaned";
+  appFilterQuery: string;
+  appSortBy: "total_size" | "binary_size" | "name" | "recent";
 
   // History & Whitelist
   scanHistory: ScanRecord[];
@@ -99,7 +113,21 @@ interface CleanState {
   closeDuplicateConfirmModal: () => void;
   executeDuplicateCleanup: () => Promise<CleanResult | null>;
   cancelDuplicateClean: () => Promise<void>;
-  scanApplications: () => Promise<void>;
+  setAppActiveTab: (tab: "installed" | "orphaned") => void;
+  setAppFilterQuery: (q: string) => void;
+  setAppSortBy: (sort: "total_size" | "binary_size" | "name" | "recent") => void;
+  scanApplications: (customDirs?: string[]) => Promise<void>;
+  scanOrphanedData: () => Promise<void>;
+  inspectDroppedApp: (path: string) => Promise<InstalledApp | null>;
+  selectAppForUninstall: (app: InstalledApp | null) => void;
+  toggleAppArtifactSelection: (path: string) => void;
+  selectAllAppArtifacts: (select: boolean) => void;
+  openUninstallModal: () => void;
+  closeUninstallModal: () => void;
+  executeUninstall: () => Promise<CleanResult | null>;
+  toggleOrphanedPathSelection: (path: string) => void;
+  selectAllOrphanedPaths: (select: boolean) => void;
+  executeCleanOrphaned: () => Promise<CleanResult | null>;
   fetchHistory: () => Promise<void>;
   fetchWhitelist: () => Promise<void>;
   addWhitelist: (path: string, reason: string) => Promise<void>;
@@ -154,6 +182,19 @@ export const useCleanStore = create<CleanState>((set, get) => ({
 
   installedApps: [],
   isAppsScanning: false,
+  orphanedResult: null,
+  isOrphanedScanning: false,
+  selectedAppForUninstall: null,
+  selectedArtifactPaths: new Set<string>(),
+  isUninstalling: false,
+  showUninstallModal: false,
+  lastUninstallResult: null,
+  orphanedSelectedPaths: new Set<string>(),
+  isCleaningOrphaned: false,
+  lastOrphanedCleanResult: null,
+  appActiveTab: "installed",
+  appFilterQuery: "",
+  appSortBy: "total_size",
 
   scanHistory: [],
   cleanupHistory: [],
@@ -654,14 +695,205 @@ export const useCleanStore = create<CleanState>((set, get) => ({
     }
   },
 
-  scanApplications: async () => {
+  setAppActiveTab: (tab) => set({ appActiveTab: tab }),
+  setAppFilterQuery: (q) => set({ appFilterQuery: q }),
+  setAppSortBy: (sort) => set({ appSortBy: sort }),
+
+  scanApplications: async (customDirs) => {
     set({ isAppsScanning: true });
     try {
-      const apps = await api.scanApplications();
+      const apps = await api.scanApplications(customDirs);
       set({ installedApps: apps, isAppsScanning: false });
     } catch (err) {
       console.error("App scan error:", err);
       set({ isAppsScanning: false });
+    }
+  },
+
+  scanOrphanedData: async () => {
+    set({ isOrphanedScanning: true });
+    try {
+      const res = await api.scanOrphanedData();
+      const eligiblePaths = new Set(
+        res.items.filter((i) => i.is_eligible_for_cleanup).map((i) => i.path)
+      );
+      set({
+        orphanedResult: res,
+        orphanedSelectedPaths: eligiblePaths,
+        isOrphanedScanning: false,
+      });
+    } catch (err) {
+      console.error("Orphaned scan error:", err);
+      set({ isOrphanedScanning: false });
+    }
+  },
+
+  inspectDroppedApp: async (path: string) => {
+    try {
+      const app = await api.inspectDroppedApp(path);
+      get().selectAppForUninstall(app);
+      return app;
+    } catch (err) {
+      console.error("Inspect dropped app error:", err);
+      return null;
+    }
+  },
+
+  selectAppForUninstall: (app) => {
+    if (!app) {
+      set({ selectedAppForUninstall: null, selectedArtifactPaths: new Set() });
+      return;
+    }
+    const defaults = new Set(
+      app.artifacts.filter((a) => a.is_selected_by_default).map((a) => a.path)
+    );
+    set({ selectedAppForUninstall: app, selectedArtifactPaths: defaults });
+  },
+
+  toggleAppArtifactSelection: (path) => {
+    set((state) => {
+      const next = new Set(state.selectedArtifactPaths);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
+      return { selectedArtifactPaths: next };
+    });
+  },
+
+  selectAllAppArtifacts: (select) => {
+    set((state) => {
+      if (!state.selectedAppForUninstall) return state;
+      if (select) {
+        return {
+          selectedArtifactPaths: new Set(
+            state.selectedAppForUninstall.artifacts.map((a) => a.path)
+          ),
+        };
+      }
+      return { selectedArtifactPaths: new Set() };
+    });
+  },
+
+  openUninstallModal: () => set({ showUninstallModal: true }),
+  closeUninstallModal: () => set({ showUninstallModal: false }),
+
+  executeUninstall: async () => {
+    const { selectedAppForUninstall, selectedArtifactPaths, dryRunMode } = get();
+    if (!selectedAppForUninstall || selectedArtifactPaths.size === 0) return null;
+
+    set({ isUninstalling: true });
+    try {
+      const res = await api.uninstallApplication({
+        app_path: selectedAppForUninstall.app_path,
+        bundle_id: selectedAppForUninstall.bundle_id,
+        paths_to_delete: Array.from(selectedArtifactPaths),
+        dry_run: dryRunMode,
+        confirmed: true,
+      });
+
+      set({
+        lastUninstallResult: res,
+        isUninstalling: false,
+        showUninstallModal: false,
+      });
+
+      if (!dryRunMode && res.items_deleted > 0) {
+        if (selectedArtifactPaths.has(selectedAppForUninstall.app_path)) {
+          set((state) => ({
+            installedApps: state.installedApps.filter(
+              (a) => a.app_path !== selectedAppForUninstall.app_path
+            ),
+            selectedAppForUninstall: null,
+            selectedArtifactPaths: new Set(),
+          }));
+        } else {
+          get().scanApplications();
+        }
+
+        get().fetchSystemSummary();
+        get().fetchHistory();
+      }
+
+      return res;
+    } catch (err) {
+      console.error("Uninstall error:", err);
+      set({ isUninstalling: false });
+      return null;
+    }
+  },
+
+  toggleOrphanedPathSelection: (path) => {
+    set((state) => {
+      const next = new Set(state.orphanedSelectedPaths);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
+      return { orphanedSelectedPaths: next };
+    });
+  },
+
+  selectAllOrphanedPaths: (select) => {
+    set((state) => {
+      if (!state.orphanedResult) return state;
+      if (select) {
+        return {
+          orphanedSelectedPaths: new Set(
+            state.orphanedResult.items
+              .filter((i) => i.is_eligible_for_cleanup)
+              .map((i) => i.path)
+          ),
+        };
+      }
+      return { orphanedSelectedPaths: new Set() };
+    });
+  },
+
+  executeCleanOrphaned: async () => {
+    const { orphanedSelectedPaths, orphanedResult, dryRunMode } = get();
+    if (!orphanedResult || orphanedSelectedPaths.size === 0) return null;
+
+    set({ isCleaningOrphaned: true });
+    try {
+      const res = await api.cleanOrphanedData({
+        paths: Array.from(orphanedSelectedPaths),
+        dry_run: dryRunMode,
+        confirmed: true,
+      });
+
+      set({
+        lastOrphanedCleanResult: res,
+        isCleaningOrphaned: false,
+      });
+
+      if (!dryRunMode && res.items_deleted > 0) {
+        const deletedSet = new Set(orphanedSelectedPaths);
+        const remaining = orphanedResult.items.filter((i) => !deletedSet.has(i.path));
+        const remBytes = remaining.reduce((acc, i) => acc + i.size_bytes, 0);
+        const remAlloc = remaining.reduce((acc, i) => acc + i.allocated_bytes, 0);
+
+        set({
+          orphanedResult: {
+            total_items: remaining.length,
+            total_bytes: remBytes,
+            total_allocated_bytes: remAlloc,
+            items: remaining,
+          },
+          orphanedSelectedPaths: new Set(),
+        });
+
+        get().fetchSystemSummary();
+        get().fetchHistory();
+      }
+
+      return res;
+    } catch (err) {
+      console.error("Clean orphaned error:", err);
+      set({ isCleaningOrphaned: false });
+      return null;
     }
   },
 

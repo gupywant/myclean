@@ -13,6 +13,7 @@ import { HistoryView } from "./components/history/HistoryView";
 import { SettingsView } from "./components/settings/SettingsView";
 import { ConfirmCleanModal } from "./components/modals/ConfirmCleanModal";
 import { DuplicateConfirmModal } from "./components/modals/DuplicateConfirmModal";
+import { AppUninstallModal } from "./components/modals/AppUninstallModal";
 
 export const App: React.FC = () => {
   const { activeTab, fetchSystemSummary, fetchHistory } = useFluxStore();
@@ -49,6 +50,7 @@ export const App: React.FC = () => {
       {/* Confirmation Modals */}
       <ConfirmCleanModal />
       <DuplicateConfirmModal />
+      <AppUninstallModal />
     </div>
   );
 };

@@ -16,6 +16,9 @@ import type {
   ActiveAppWarning,
   DuplicateScanProgress,
   CleanDuplicatesRequest,
+  OrphanedScanResult,
+  UninstallAppRequest,
+  CleanOrphanedRequest,
 } from "../types";
 
 export const isTauriEnvironment = (): boolean => {
@@ -311,7 +314,7 @@ export const api = {
     return invoke<boolean>("cancel_duplicate_clean");
   },
 
-  async scanApplications(): Promise<InstalledApp[]> {
+  async scanApplications(customDirs?: string[]): Promise<InstalledApp[]> {
     if (!isTauriEnvironment()) {
       await new Promise((r) => setTimeout(r, 500));
       return [
@@ -319,31 +322,213 @@ export const api = {
           name: "Docker Desktop",
           bundle_id: "com.docker.docker",
           version: "4.35.0",
+          publisher: "Docker Inc.",
           app_path: "/Applications/Docker.app",
+          icon_data_url: null,
+          installation_source: "User Installed",
+          is_system_app: false,
+          is_running: false,
+          running_pids: [],
+          last_modified: new Date(Date.now() - 86400000 * 5).toISOString(),
           total_size_bytes: 4890000000,
+          allocated_size_bytes: 4910000000,
           binary_size_bytes: 1200000000,
+          binary_allocated_bytes: 1210000000,
           artifacts: [
-            { path: "/Applications/Docker.app", kind: "Application Bundle", size_bytes: 1200000000 },
-            { path: "/Users/user/Library/Containers/com.docker.docker", kind: "Containers & VM Image", size_bytes: 3500000000 },
-            { path: "/Users/user/Library/Caches/com.docker.docker", kind: "Caches", size_bytes: 190000000 },
+            {
+              path: "/Applications/Docker.app",
+              kind: "Application Bundle",
+              size_bytes: 1200000000,
+              allocated_bytes: 1210000000,
+              confidence: "High",
+              is_database_or_persistent: false,
+              explanation: "Core executable bundle",
+              is_selected_by_default: true,
+            },
+            {
+              path: "/Users/user/Library/Containers/com.docker.docker",
+              kind: "Containers",
+              size_bytes: 3500000000,
+              allocated_bytes: 3510000000,
+              confidence: "ReviewRequired",
+              is_database_or_persistent: true,
+              explanation: "Container runtime data & VMs",
+              is_selected_by_default: false,
+            },
+            {
+              path: "/Users/user/Library/Caches/com.docker.docker",
+              kind: "Caches",
+              size_bytes: 190000000,
+              allocated_bytes: 190000000,
+              confidence: "High",
+              is_database_or_persistent: false,
+              explanation: "Disposable runtime cache",
+              is_selected_by_default: true,
+            },
           ],
         },
         {
           name: "Slack",
           bundle_id: "com.tinyspeck.slackmacgap",
           version: "4.41.0",
+          publisher: "Slack Technologies LLC",
           app_path: "/Applications/Slack.app",
+          icon_data_url: null,
+          installation_source: "Mac App Store",
+          is_system_app: false,
+          is_running: true,
+          running_pids: [1234, 1235],
+          last_modified: new Date(Date.now() - 86400000 * 2).toISOString(),
           total_size_bytes: 2450000000,
+          allocated_size_bytes: 2460000000,
           binary_size_bytes: 380000000,
+          binary_allocated_bytes: 385000000,
           artifacts: [
-            { path: "/Applications/Slack.app", kind: "Application Bundle", size_bytes: 380000000 },
-            { path: "/Users/user/Library/Application Support/Slack", kind: "Application Support", size_bytes: 1820000000 },
-            { path: "/Users/user/Library/Caches/com.tinyspeck.slackmacgap", kind: "Caches", size_bytes: 250000000 },
+            {
+              path: "/Applications/Slack.app",
+              kind: "Application Bundle",
+              size_bytes: 380000000,
+              allocated_bytes: 385000000,
+              confidence: "High",
+              is_database_or_persistent: false,
+              explanation: "Core executable bundle",
+              is_selected_by_default: true,
+            },
+            {
+              path: "/Users/user/Library/Application Support/Slack",
+              kind: "Application Support",
+              size_bytes: 1820000000,
+              allocated_bytes: 1825000000,
+              confidence: "Protected",
+              is_database_or_persistent: true,
+              explanation: "Local workspace database & sessions",
+              is_selected_by_default: false,
+            },
+            {
+              path: "/Users/user/Library/Caches/com.tinyspeck.slackmacgap",
+              kind: "Caches",
+              size_bytes: 250000000,
+              allocated_bytes: 250000000,
+              confidence: "High",
+              is_database_or_persistent: false,
+              explanation: "Network HTTP and image caches",
+              is_selected_by_default: true,
+            },
           ],
         },
       ];
     }
-    return invoke<InstalledApp[]>("scan_applications");
+    return invoke<InstalledApp[]>("scan_applications", { customDirs });
+  },
+
+  async scanOrphanedData(): Promise<OrphanedScanResult> {
+    if (!isTauriEnvironment()) {
+      await new Promise((r) => setTimeout(r, 600));
+      return {
+        total_items: 2,
+        total_bytes: 750000000,
+        total_allocated_bytes: 755000000,
+        items: [
+          {
+            path: "/Users/user/Library/Caches/com.spotify.client",
+            bundle_id: "com.spotify.client",
+            kind: "Caches",
+            size_bytes: 520000000,
+            allocated_bytes: 522000000,
+            confidence: "High",
+            explanation: "Residual cache from uninstalled application 'com.spotify.client'",
+            last_modified: new Date(Date.now() - 86400000 * 30).toISOString(),
+            is_eligible_for_cleanup: true,
+          },
+          {
+            path: "/Users/user/Library/Saved Application State/com.postmanlabs.mac.savedState",
+            bundle_id: "com.postmanlabs.mac",
+            kind: "Saved State",
+            size_bytes: 230000000,
+            allocated_bytes: 233000000,
+            confidence: "High",
+            explanation: "Residual window state from uninstalled application 'com.postmanlabs.mac'",
+            last_modified: new Date(Date.now() - 86400000 * 45).toISOString(),
+            is_eligible_for_cleanup: true,
+          },
+        ],
+      };
+    }
+    return invoke<OrphanedScanResult>("scan_orphaned_data");
+  },
+
+  async inspectDroppedApp(path: string): Promise<InstalledApp> {
+    if (!isTauriEnvironment()) {
+      await new Promise((r) => setTimeout(r, 400));
+      return {
+        name: "DroppedApp",
+        bundle_id: "com.example.droppedapp",
+        version: "1.0.0",
+        publisher: "Independent Developer",
+        app_path: path,
+        icon_data_url: null,
+        installation_source: "User Installed",
+        is_system_app: false,
+        is_running: false,
+        running_pids: [],
+        last_modified: new Date().toISOString(),
+        total_size_bytes: 450000000,
+        allocated_size_bytes: 452000000,
+        binary_size_bytes: 350000000,
+        binary_allocated_bytes: 351000000,
+        artifacts: [
+          {
+            path,
+            kind: "Application Bundle",
+            size_bytes: 350000000,
+            allocated_bytes: 351000000,
+            confidence: "High",
+            is_database_or_persistent: false,
+            explanation: "Executable bundle",
+            is_selected_by_default: true,
+          },
+        ],
+      };
+    }
+    return invoke<InstalledApp>("inspect_dropped_app", { path });
+  },
+
+  async uninstallApplication(request: UninstallAppRequest): Promise<CleanResult> {
+    if (!isTauriEnvironment()) {
+      await new Promise((r) => setTimeout(r, 600));
+      return {
+        success: true,
+        dry_run: request.dry_run,
+        bytes_freed: 1580000000,
+        bytes_moved_to_trash: request.dry_run ? 0 : 1580000000,
+        items_deleted: request.paths_to_delete.length,
+        items_skipped: 0,
+        items_failed: 0,
+        errors: [],
+        duration_ms: 420,
+        was_cancelled: false,
+      };
+    }
+    return invoke<CleanResult>("uninstall_application", { request });
+  },
+
+  async cleanOrphanedData(request: CleanOrphanedRequest): Promise<CleanResult> {
+    if (!isTauriEnvironment()) {
+      await new Promise((r) => setTimeout(r, 500));
+      return {
+        success: true,
+        dry_run: request.dry_run,
+        bytes_freed: 750000000,
+        bytes_moved_to_trash: request.dry_run ? 0 : 750000000,
+        items_deleted: request.paths.length,
+        items_skipped: 0,
+        items_failed: 0,
+        errors: [],
+        duration_ms: 380,
+        was_cancelled: false,
+      };
+    }
+    return invoke<CleanResult>("clean_orphaned_data", { request });
   },
 
   async getScanHistory(limit?: number): Promise<ScanRecord[]> {

@@ -259,20 +259,69 @@ export interface CleanDuplicatesRequest {
   confirmed: boolean;
 }
 
+export type ConfidenceLevel = "High" | "ReviewRequired" | "Protected";
+
 export interface AppArtifact {
   path: string;
   kind: string;
   size_bytes: number;
+  allocated_bytes: number;
+  confidence: ConfidenceLevel;
+  is_database_or_persistent: boolean;
+  explanation: string;
+  is_selected_by_default: boolean;
 }
 
 export interface InstalledApp {
   name: string;
   bundle_id: string;
   version: string;
+  publisher: string | null;
   app_path: string;
+  icon_data_url: string | null;
+  installation_source: string;
+  is_system_app: boolean;
+  is_running: boolean;
+  running_pids: number[];
+  last_modified: string | null;
   total_size_bytes: number;
+  allocated_size_bytes: number;
   binary_size_bytes: number;
+  binary_allocated_bytes: number;
   artifacts: AppArtifact[];
+}
+
+export interface OrphanedAppArtifact {
+  path: string;
+  bundle_id: string;
+  kind: string;
+  size_bytes: number;
+  allocated_bytes: number;
+  confidence: ConfidenceLevel;
+  explanation: string;
+  last_modified: string | null;
+  is_eligible_for_cleanup: boolean;
+}
+
+export interface OrphanedScanResult {
+  total_items: number;
+  total_bytes: number;
+  total_allocated_bytes: number;
+  items: OrphanedAppArtifact[];
+}
+
+export interface UninstallAppRequest {
+  app_path: string;
+  bundle_id: string;
+  paths_to_delete: string[];
+  dry_run: boolean;
+  confirmed: boolean;
+}
+
+export interface CleanOrphanedRequest {
+  paths: string[];
+  dry_run: boolean;
+  confirmed: boolean;
 }
 
 export interface ScanRecord {
