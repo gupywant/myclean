@@ -196,9 +196,50 @@
   - `cargo clippy -- -D warnings` passing with 0 warnings.
   - `npm run build` (`tsc && vite build`) passing cleanly with 0 type errors.
 
-### Phase 07: Developer & Docker Cleaner
-- [ ] Docker VM analysis via Docker CLI/API (not raw VM disks)
-- [ ] Node modules & Cargo target cleaner
+### Phase 07: Developer & Docker Cleaner (COMPLETED)
+- [x] **Modular Developer Cleanup Provider Architecture (`developer.rs`):**
+  - Unified `DeveloperProvider` trait with methods: `detect`, `inspect`, `estimate`, `validate`, `cleanup`, and `explain_risk`.
+  - Typed risk classifications: `DeveloperRiskLevel` (`SafeToRebuild`, `NeedsProjectReview`, `HighRiskProtected`) and `RiskExplanation` with rebuild instructions and disposable rationale.
+  - Strict boundary validation ensuring providers only touch authorized cache directories and never arbitrary filesystem paths.
+- [x] **Conservative Tool Cache Providers (`developer.rs`):**
+  - **Xcode DerivedData Provider:** Discovers and clears `~/Library/Developer/Xcode/DerivedData` build products, index stores, and module caches safely without touching Xcode configurations or templates.
+  - **Homebrew Cache Provider:** Safely purges downloaded bottles and git clone caches in `~/Library/Caches/Homebrew` while preserving formula definitions and installed taps.
+  - **Cargo Cache Provider:** Scans `~/.cargo/registry` and `~/.cargo/git`, strictly protecting `~/.cargo/bin`, `credentials`, `config.toml`, and environment configuration.
+  - **npm Cache Provider:** Restricts cleanup strictly to `~/.npm/_cacache`, preserving `package-lock.json`, npm configs, and global modules.
+  - **pnpm Store Provider:** Detects and verifies pnpm content-addressable store (`Library/pnpm/store`), explaining rebuild impact.
+  - **Yarn Cache Provider:** Targets versioned Yarn v1/v2/v3 global cache directories while preserving Yarn RC files and global binaries.
+  - **Gradle Cache Provider:** Purges `~/.gradle/caches`, strictly protecting `gradle-wrapper.jar`, `gradle.properties`, wrapper distributions, and global init scripts.
+  - **Swift Package Manager Provider:** Detects `~/Library/Caches/org.swift.swiftpm` repository and artifact cache.
+- [x] **Project Workspace Artifacts Provider (`developer.rs`):**
+  - Scans user-registered project workspaces for build outputs.
+  - Strict manifest verification: `target/` directories require a verified `Cargo.toml` in the same directory; `node_modules/` require a verified `package.json`.
+  - Rejects arbitrary directories named `target` or `node_modules` without valid build manifests.
+- [x] **Docker Integration & Daemon Inspection (`docker.rs`):**
+  - Discovers official Docker CLI paths (`/usr/local/bin/docker`, `/opt/homebrew/bin/docker`).
+  - Daemon status checking via `docker info` detecting whether the daemon is online, paused, or offline; refuses to auto-restart stopped daemons, explaining why with user-friendly guidance.
+  - Docker storage breakdown via `docker system df --format json` for images, containers, local volumes, and build cache.
+  - Resource inspection via structured commands (`docker ps -a`, `docker image ls -a`, `docker builder du`, `docker network ls`, `docker volume ls`).
+- [x] **Docker Safety Guardrails & Selective Cleanup (`docker.rs`):**
+  - **Strict Docker Volume Protection:** Docker volumes are classified as `is_protected = true` and strictly blocked from deletion by backend validation.
+  - **Command Injection Prevention:** All resource IDs and parameters are validated against strict regex (`^[a-zA-Z0-9_\-\.:/]+$`).
+  - Never executes arbitrary shell strings; all invocations use structured `std::process::Command` argument arrays.
+  - Selective cleanup of stopped containers, dangling/unused images, build cache, and unused networks using tool-native commands (`docker rm`, `docker rmi`, `docker builder prune`, `docker network rm`).
+  - Space compaction advisory: alerts users that Docker for Mac VM disk files (`Docker.raw`) do not automatically shrink host disk allocation upon container/image removal, providing clear guidance on host compaction.
+- [x] **Recoverable Deletion & Audit Trail:**
+  - Filesystem artifacts deleted exclusively via native macOS Trash (`trash::delete(&canonical)`); permanent deletion strictly disabled.
+  - Dry-run simulation mode supported for both developer caches and Docker operations.
+  - Comprehensive SQLite audit logging storing detailed JSON payload (`CleanupAuditDetail`) in `myclean.db`.
+- [x] **Futuristic Premium UI Experience (`DeveloperSpaceView.tsx`, `DeveloperCleanModal.tsx`, `DockerCleanModal.tsx`):**
+  - Three specialized studio views: **Tool Caches**, **Project Workspaces**, and **Docker Studio**.
+  - Real-time status cards: Active Caches Footprint, Reclaimable Space, Docker Status badge with pulse ring.
+  - Filterable Docker resource table with protected volume badge and locked indicator.
+  - Dedicated `DeveloperCleanModal` with dry-run toggle, risk explanations, and space metrics.
+  - Dedicated `DockerCleanModal` highlighting volume protection and VM disk compaction guidance.
+- [x] **Automated Tests & Regression Coverage:**
+  - 65 tests passing across all test suites (41 unit tests + 7 `apps_safety.rs` + 9 `developer_safety.rs` + 6 `docker_safety.rs` + 2 `duplicates_safety.rs`).
+  - Covers boundary checking, credential protection, wrapper protection, npm cache restriction, manifest requirement, command injection prevention, and volume protection.
+  - `cargo clippy -- -D warnings` passing with 0 warnings.
+  - `npm run build` (`tsc && vite build`) passing cleanly with 0 type errors.
 
 ### Phase 08: Settings & Cleanup History
 - [ ] Full audit trail viewer and custom exclusion editor
