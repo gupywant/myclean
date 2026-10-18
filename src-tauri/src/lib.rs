@@ -21,6 +21,7 @@ pub fn run() {
         scan_cancel_token: Arc::new(AtomicBool::new(false)),
         clean_cancel_token: Arc::new(AtomicBool::new(false)),
         duplicate_cancel_token: Arc::new(AtomicBool::new(false)),
+        duplicate_clean_cancel_token: Arc::new(AtomicBool::new(false)),
         storage_cancel_token: Arc::new(AtomicBool::new(false)),
     };
 
@@ -35,6 +36,8 @@ pub fn run() {
             commands::check_active_applications,
             commands::scan_duplicates,
             commands::cancel_duplicate_scan,
+            commands::clean_duplicates,
+            commands::cancel_duplicate_clean,
             commands::scan_applications,
             commands::get_scan_history,
             commands::get_cleanup_history,

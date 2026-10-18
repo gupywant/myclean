@@ -1,7 +1,7 @@
 use crate::apps::{AppInspector, InstalledApp};
 use crate::cleaner::{ActiveAppWarning, CleanRequest, CleanResult, Cleaner};
 use crate::db::{CleanupRecord, Database, ScanRecord, WhitelistEntry};
-use crate::duplicates::{DuplicateScanResult, DuplicateScanner};
+use crate::duplicates::{CleanDuplicatesRequest, DuplicateScanProgress, DuplicateScanResult, DuplicateScanner};
 use crate::scanner::{ScanProgress, ScanResult, ScanScopeConfig, Scanner};
 use crate::storage::{StorageAnalysisResult, StorageAnalyzer};
 use crate::system::{SystemSummary, SystemTelemetry};
@@ -15,6 +15,7 @@ pub struct AppState {
     pub scan_cancel_token: Arc<AtomicBool>,
     pub clean_cancel_token: Arc<AtomicBool>,
     pub duplicate_cancel_token: Arc<AtomicBool>,
+    pub duplicate_clean_cancel_token: Arc<AtomicBool>,
     pub storage_cancel_token: Arc<AtomicBool>,
 }
 
@@ -95,6 +96,7 @@ pub fn check_active_applications(paths: Vec<String>) -> Result<Vec<ActiveAppWarn
 
 #[tauri::command]
 pub async fn scan_duplicates(
+    app: AppHandle,
     state: State<'_, AppState>,
     target_path: Option<String>,
     min_size_bytes: Option<u64>,
@@ -110,7 +112,10 @@ pub async fn scan_duplicates(
     let min_bytes = min_size_bytes.unwrap_or(1024 * 1024); // default 1MB
 
     tokio::task::spawn_blocking(move || {
-        DuplicateScanner::scan_duplicates(target, min_bytes, cancel)
+        let app_handle = app.clone();
+        DuplicateScanner::scan_duplicates_advanced(target, min_bytes, cancel, move |prog: DuplicateScanProgress| {
+            let _ = app_handle.emit("duplicate:progress", &prog);
+        })
     })
     .await
     .map_err(|e| e.to_string())
@@ -119,6 +124,25 @@ pub async fn scan_duplicates(
 #[tauri::command]
 pub fn cancel_duplicate_scan(state: State<'_, AppState>) -> bool {
     state.duplicate_cancel_token.store(true, Ordering::Relaxed);
+    true
+}
+
+#[tauri::command]
+pub async fn clean_duplicates(
+    state: State<'_, AppState>,
+    request: CleanDuplicatesRequest,
+) -> Result<CleanResult, String> {
+    state.duplicate_clean_cancel_token.store(false, Ordering::Relaxed);
+    let cancel = state.duplicate_clean_cancel_token.clone();
+    let db = state.db.clone();
+    tokio::task::spawn_blocking(move || DuplicateScanner::clean_duplicate_groups(request, &db, cancel))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub fn cancel_duplicate_clean(state: State<'_, AppState>) -> bool {
+    state.duplicate_clean_cancel_token.store(true, Ordering::Relaxed);
     true
 }
 
