@@ -141,6 +141,95 @@ impl SafetyGuard {
         false
     }
 
+    /// Evaluates whether a path is subject to mandatory exclusions from automated scanning or cleaning.
+    /// Excludes: SIP, Keychains, Mail, Messages, iCloud Drive, Docker VM disks, Time Machine,
+    /// .git directories, broad /private/var/folders, and unrestricted Containers.
+    pub fn is_mandatory_exclusion<P: AsRef<Path>>(path: P) -> bool {
+        let p = path.as_ref();
+        let path_str = p.to_string_lossy();
+
+        // 1. Any .git internal directory
+        for comp in p.components() {
+            if comp.as_os_str() == ".git" {
+                return true;
+            }
+        }
+
+        // 2. SIP and core system
+        if Self::is_system_protected(p) {
+            return true;
+        }
+
+        // 3. User protected privacy/keys/docs
+        if Self::is_user_data_protected(p) {
+            return true;
+        }
+
+        // 4. Time Machine & spotlight metadata
+        if path_str.contains(".MobileBackups")
+            || path_str.contains("Backups.backupdb")
+            || path_str.contains(".Spotlight-V100")
+            || path_str.contains(".fseventsd")
+        {
+            return true;
+        }
+
+        // 5. Docker Desktop VM virtual disks
+        if path_str.contains("com.docker.docker/Data/vms")
+            || path_str.ends_with("Docker.raw")
+            || path_str.ends_with("Docker.qcow2")
+        {
+            return true;
+        }
+
+        // 6. Broad /private/var/folders traversal restriction
+        if path_str == "/private/var/folders" || path_str == "/private/var/folders/" {
+            return true;
+        }
+
+        // 7. Containers restriction: permit only explicitly supported cache / downloads subpaths
+        if let Some(home) = dirs::home_dir() {
+            let containers = home.join("Library/Containers");
+            let group_containers = home.join("Library/Group Containers");
+
+            if p.starts_with(&containers) || p.starts_with(&group_containers) {
+                let p_str = p.to_string_lossy();
+                let is_safe_container_cache = p_str.contains("/Data/Library/Caches")
+                    || p_str.contains("/Data/Library/Mail Downloads");
+                if !is_safe_container_cache {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
+    /// Checks if a symlink target escapes an allowed root directory.
+    pub fn symlink_escapes_boundary<P: AsRef<Path>, B: AsRef<Path>>(symlink_path: P, boundary: B) -> bool {
+        let p = symlink_path.as_ref();
+        let boundary = boundary.as_ref();
+
+        if let Ok(target) = std::fs::read_link(p) {
+            let resolved = if target.is_relative() {
+                if let Some(parent) = p.parent() {
+                    parent.join(&target)
+                } else {
+                    target
+                }
+            } else {
+                target
+            };
+
+            if let (Ok(canon_resolved), Ok(canon_boundary)) = (resolved.canonicalize(), boundary.canonicalize()) {
+                return !canon_resolved.starts_with(canon_boundary);
+            }
+            // Conservative: if canonicalize fails, assume it might escape
+            return true;
+        }
+        false
+    }
+
     /// Inspects running processes to prevent race conditions or database corruption
     /// caused by deleting files of an actively running macOS application.
     pub fn detect_running_application(path: &Path) -> Option<String> {
@@ -280,4 +369,49 @@ mod tests {
         let res = SafetyGuard::validate_for_cleaning(&traversal_path);
         assert!(matches!(res, Err(SafetyError::PathTraversal(_))));
     }
+
+    #[test]
+    fn test_mandatory_exclusions() {
+        assert!(SafetyGuard::is_mandatory_exclusion(Path::new("/Users/user/project/.git/HEAD")));
+        assert!(SafetyGuard::is_mandatory_exclusion(Path::new("/Users/user/Library/Containers/com.docker.docker/Data/vms/Docker.raw")));
+        assert!(SafetyGuard::is_mandatory_exclusion(Path::new("/private/var/folders")));
+        assert!(SafetyGuard::is_mandatory_exclusion(Path::new("/System/Library")));
+        if let Some(home) = dirs::home_dir() {
+            let icloud = home.join("Library/Mobile Documents");
+            assert!(SafetyGuard::is_mandatory_exclusion(&icloud));
+
+            let container_app_data = home.join("Library/Containers/com.example.app/Data/Documents");
+            assert!(SafetyGuard::is_mandatory_exclusion(&container_app_data));
+
+            let safe_container_cache = home.join("Library/Containers/com.apple.mail/Data/Library/Mail Downloads");
+            assert!(!SafetyGuard::is_mandatory_exclusion(&safe_container_cache));
+        }
+    }
+
+    #[test]
+    fn test_symlink_escapes_boundary() {
+        let temp_dir = std::env::temp_dir().join("myclean_symlink_boundary_test");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        let _ = std::fs::create_dir_all(&temp_dir);
+
+        let inside_file = temp_dir.join("inside.txt");
+        let _ = std::fs::write(&inside_file, b"inside");
+
+        let symlink_inside = temp_dir.join("link_inside");
+        let _ = std::os::unix::fs::symlink(&inside_file, &symlink_inside);
+
+        assert!(!SafetyGuard::symlink_escapes_boundary(&symlink_inside, &temp_dir));
+
+        let outside_file = std::env::temp_dir().join("outside.txt");
+        let _ = std::fs::write(&outside_file, b"outside");
+
+        let symlink_outside = temp_dir.join("link_outside");
+        let _ = std::os::unix::fs::symlink(&outside_file, &symlink_outside);
+
+        assert!(SafetyGuard::symlink_escapes_boundary(&symlink_outside, &temp_dir));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        let _ = std::fs::remove_file(&outside_file);
+    }
 }
+
