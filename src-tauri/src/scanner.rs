@@ -1,12 +1,23 @@
 use crate::safety::SafetyGuard;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::fs;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use walkdir::WalkDir;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RiskClassification {
+    #[default]
+    SafeToClean,
+    ReviewRequired,
+    Protected,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -51,8 +62,50 @@ impl ScanCategory {
         }
     }
 
+    pub fn default_classification(&self) -> RiskClassification {
+        match self {
+            ScanCategory::LargeFiles => RiskClassification::ReviewRequired,
+            _ => RiskClassification::SafeToClean,
+        }
+    }
+
     pub fn is_safe_by_default(&self) -> bool {
-        !matches!(self, ScanCategory::LargeFiles)
+        self.default_classification() == RiskClassification::SafeToClean
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScanScopeConfig {
+    pub include_system_caches: bool,
+    pub include_application_logs: bool,
+    pub include_developer_xcode: bool,
+    pub include_developer_caches: bool,
+    pub include_browser_caches: bool,
+    pub include_messaging_caches: bool,
+    pub include_trash: bool,
+    pub include_mail_downloads: bool,
+    pub include_large_files: bool,
+    pub large_files_min_mb: Option<u64>,
+    pub custom_paths: Vec<String>,
+    pub user_exclusions: Vec<String>,
+}
+
+impl Default for ScanScopeConfig {
+    fn default() -> Self {
+        Self {
+            include_system_caches: true,
+            include_application_logs: true,
+            include_developer_xcode: true,
+            include_developer_caches: true,
+            include_browser_caches: true,
+            include_messaging_caches: true,
+            include_trash: true,
+            include_mail_downloads: true,
+            include_large_files: true,
+            large_files_min_mb: Some(100),
+            custom_paths: Vec::new(),
+            user_exclusions: Vec::new(),
+        }
     }
 }
 
@@ -68,6 +121,8 @@ pub struct ScanItem {
     pub description: String,
     pub is_safe_to_clean: bool,
     pub is_selected: bool,
+    #[serde(default)]
+    pub classification: RiskClassification,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -81,13 +136,19 @@ pub struct CategorySummary {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkippedPath {
+    pub path: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScanProgress {
     pub phase: String,
     pub current_category: String,
     pub current_path: String,
     pub items_found: usize,
     pub bytes_found: u64,
-    pub percent_complete: f32,
+    pub percent_complete: f32, // -1.0 indicates indeterminate progress
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -97,6 +158,8 @@ pub struct ScanResult {
     pub total_items: usize,
     pub categories: Vec<CategorySummary>,
     pub items: Vec<ScanItem>,
+    #[serde(default)]
+    pub skipped_paths: Vec<SkippedPath>,
     pub was_cancelled: bool,
 }
 
@@ -105,30 +168,147 @@ pub struct Scanner;
 impl Scanner {
     /// Calculate size and file count of a directory or single file without following external symlinks
     pub fn measure_path<P: AsRef<Path>>(path: P) -> (u64, usize) {
+        let mut visited = HashSet::new();
+        let mut skipped = Vec::new();
+        let cancel = AtomicBool::new(false);
+        Self::measure_path_advanced(path, &mut visited, &mut skipped, &[], &cancel)
+    }
+
+    /// Advanced path measurement supporting hard-link deduplication, symlink safety,
+    /// filesystem boundary checks, and permission error capture.
+    pub fn measure_path_advanced<P: AsRef<Path>>(
+        path: P,
+        visited_inodes: &mut HashSet<(u64, u64)>,
+        skipped_paths: &mut Vec<SkippedPath>,
+        user_exclusions: &[String],
+        cancel_token: &AtomicBool,
+    ) -> (u64, usize) {
         let p = path.as_ref();
         if !p.exists() {
             return (0, 0);
         }
 
-        if p.is_file() || p.is_symlink() {
-            let meta = p.symlink_metadata();
-            let size = meta.map(|m| m.len()).unwrap_or(0);
-            return (size, 1);
+        // Check user exclusions
+        let path_str = p.to_string_lossy();
+        for excl in user_exclusions {
+            if path_str.starts_with(excl) {
+                return (0, 0);
+            }
         }
+
+        // Check mandatory safety exclusion
+        if SafetyGuard::is_mandatory_exclusion(p) {
+            return (0, 0);
+        }
+
+        if p.is_file() || p.is_symlink() {
+            let meta = match p.symlink_metadata() {
+                Ok(m) => m,
+                Err(e) => {
+                    skipped_paths.push(SkippedPath {
+                        path: path_str.to_string(),
+                        reason: e.to_string(),
+                    });
+                    return (0, 0);
+                }
+            };
+
+            // Hard-link deduplication for individual files
+            if meta.nlink() > 1 {
+                let key = (meta.dev(), meta.ino());
+                if !visited_inodes.insert(key) {
+                    return (0, 1); // File exists but bytes already accounted for
+                }
+            }
+
+            return (meta.len(), 1);
+        }
+
+        let root_meta = match p.symlink_metadata() {
+            Ok(m) => m,
+            Err(e) => {
+                skipped_paths.push(SkippedPath {
+                    path: path_str.to_string(),
+                    reason: e.to_string(),
+                });
+                return (0, 0);
+            }
+        };
+        let root_dev = root_meta.dev();
 
         let mut total_size = 0u64;
         let mut file_count = 0usize;
 
-        for entry in WalkDir::new(p)
+        // WalkDir with follow_links(false)
+        let walker = WalkDir::new(p)
             .follow_links(false)
             .into_iter()
-            .filter_map(|e| e.ok())
-        {
-            if let Ok(meta) = entry.path().symlink_metadata() {
-                if meta.is_file() {
-                    total_size += meta.len();
-                    file_count += 1;
+            .filter_entry(|entry| {
+                let ep = entry.path();
+                // Prune .git and mandatory exclusions from traversing deeper
+                !SafetyGuard::is_mandatory_exclusion(ep)
+            });
+
+        for entry_res in walker {
+            if cancel_token.load(Ordering::Relaxed) {
+                break;
+            }
+
+            let entry = match entry_res {
+                Ok(e) => e,
+                Err(err) => {
+                    let err_path = err.path().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+                    skipped_paths.push(SkippedPath {
+                        path: err_path,
+                        reason: err.to_string(),
+                    });
+                    continue;
                 }
+            };
+
+            let ep = entry.path();
+            if ep == p {
+                continue; // Skip root entry
+            }
+
+            let meta = match ep.symlink_metadata() {
+                Ok(m) => m,
+                Err(err) => {
+                    // Handle files modified or deleted during scan
+                    skipped_paths.push(SkippedPath {
+                        path: ep.to_string_lossy().to_string(),
+                        reason: err.to_string(),
+                    });
+                    continue;
+                }
+            };
+
+            // Check filesystem boundary (do not cross to different mounted volume)
+            if meta.dev() != root_dev {
+                continue;
+            }
+
+            // If symlink, record size of the link itself, never follow external path
+            if meta.file_type().is_symlink() {
+                total_size += meta.len();
+                file_count += 1;
+                continue;
+            }
+
+            if meta.is_file() {
+                let dev = meta.dev();
+                let ino = meta.ino();
+                let nlink = meta.nlink();
+
+                // Hard-link deduplication
+                if nlink > 1 {
+                    if visited_inodes.insert((dev, ino)) {
+                        total_size += meta.len();
+                    }
+                } else {
+                    total_size += meta.len();
+                }
+                file_count += 1;
             }
         }
 
@@ -136,7 +316,16 @@ impl Scanner {
     }
 
     /// Fast parallel scanner inspecting system caches, developer artifacts, logs, and trash
-    pub fn scan<F>(
+    pub fn scan<F>(cancel_token: Arc<AtomicBool>, progress_cb: F) -> ScanResult
+    where
+        F: Fn(ScanProgress) + Send + Sync,
+    {
+        Self::scan_with_config(ScanScopeConfig::default(), cancel_token, progress_cb)
+    }
+
+    /// Parallel scanner with configurable scopes, strict exclusions, and incremental events
+    pub fn scan_with_config<F>(
+        config: ScanScopeConfig,
         cancel_token: Arc<AtomicBool>,
         progress_cb: F,
     ) -> ScanResult
@@ -148,90 +337,130 @@ impl Scanner {
         let mut targets: Vec<(ScanCategory, PathBuf, &'static str)> = Vec::new();
 
         // 1. System & User Caches
-        let user_caches = home.join("Library/Caches");
-        if user_caches.exists() {
-            if let Ok(entries) = fs::read_dir(&user_caches) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    let name = entry.file_name().to_string_lossy().to_string();
+        if config.include_system_caches || config.include_browser_caches || config.include_messaging_caches || config.include_developer_caches {
+            let user_caches = home.join("Library/Caches");
+            if user_caches.exists() {
+                if let Ok(entries) = fs::read_dir(&user_caches) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        let name = entry.file_name().to_string_lossy().to_string();
 
-                    // Specific subcategories take precedence
-                    if name.contains("Google") || name.contains("Brave") || name.contains("Safari") || name.contains("Firefox") {
-                        targets.push((ScanCategory::BrowserCaches, path, "Browser Web Cache"));
-                    } else if name.contains("Slack") || name.contains("Discord") || name.contains("Telegram") || name.contains("Teams") {
-                        targets.push((ScanCategory::MessagingCaches, path, "Messaging App Cache"));
-                    } else if name.contains("Homebrew") {
-                        targets.push((ScanCategory::DeveloperCaches, path, "Homebrew Formula & Bottle Caches"));
-                    } else {
-                        targets.push((ScanCategory::SystemCaches, path, "Application Cache Directory"));
+                        // Specific subcategories take precedence
+                        if name.contains("Google") || name.contains("Brave") || name.contains("Safari") || name.contains("Firefox") || name.contains("Microsoft Edge") {
+                            if config.include_browser_caches {
+                                targets.push((ScanCategory::BrowserCaches, path, "Browser Web Cache"));
+                            }
+                        } else if name.contains("Slack") || name.contains("Discord") || name.contains("Telegram") || name.contains("Teams") || name.contains("com.tinyspeck.slackmacgap") {
+                            if config.include_messaging_caches {
+                                targets.push((ScanCategory::MessagingCaches, path, "Messaging App Cache"));
+                            }
+                        } else if name.contains("Homebrew") {
+                            if config.include_developer_caches {
+                                targets.push((ScanCategory::DeveloperCaches, path, "Homebrew Formula & Bottle Caches"));
+                            }
+                        } else if config.include_system_caches {
+                            targets.push((ScanCategory::SystemCaches, path, "Application Cache Directory"));
+                        }
                     }
                 }
             }
         }
 
         // 2. Application Logs
-        let user_logs = home.join("Library/Logs");
-        if user_logs.exists() {
-            targets.push((ScanCategory::ApplicationLogs, user_logs, "User Application Logs"));
-        }
-        let diag_reports = home.join("Library/Logs/DiagnosticReports");
-        if diag_reports.exists() {
-            targets.push((ScanCategory::ApplicationLogs, diag_reports, "System Diagnostic & Crash Reports"));
+        if config.include_application_logs {
+            let user_logs = home.join("Library/Logs");
+            if user_logs.exists() {
+                targets.push((ScanCategory::ApplicationLogs, user_logs, "User Application Logs"));
+            }
+            let diag_reports = home.join("Library/Logs/DiagnosticReports");
+            if diag_reports.exists() {
+                targets.push((ScanCategory::ApplicationLogs, diag_reports, "System Diagnostic & Crash Reports"));
+            }
         }
 
         // 3. Developer Space (Xcode)
-        let xcode_derived = home.join("Library/Developer/Xcode/DerivedData");
-        if xcode_derived.exists() {
-            targets.push((ScanCategory::DeveloperXcode, xcode_derived, "Xcode Intermediate DerivedData"));
-        }
-        let xcode_archives = home.join("Library/Developer/Xcode/Archives");
-        if xcode_archives.exists() {
-            targets.push((ScanCategory::DeveloperXcode, xcode_archives, "Xcode Build Archives"));
-        }
-        let xcode_device_support = home.join("Library/Developer/Xcode/iOS DeviceSupport");
-        if xcode_device_support.exists() {
-            targets.push((ScanCategory::DeveloperXcode, xcode_device_support, "iOS Device Symbols & Support"));
+        if config.include_developer_xcode {
+            let xcode_derived = home.join("Library/Developer/Xcode/DerivedData");
+            if xcode_derived.exists() {
+                targets.push((ScanCategory::DeveloperXcode, xcode_derived, "Xcode Intermediate DerivedData"));
+            }
+            let xcode_archives = home.join("Library/Developer/Xcode/Archives");
+            if xcode_archives.exists() {
+                targets.push((ScanCategory::DeveloperXcode, xcode_archives, "Xcode Build Archives"));
+            }
+            let xcode_device_support = home.join("Library/Developer/Xcode/iOS DeviceSupport");
+            if xcode_device_support.exists() {
+                targets.push((ScanCategory::DeveloperXcode, xcode_device_support, "iOS Device Symbols & Support"));
+            }
         }
 
         // 4. Developer Tooling Caches
-        let cargo_cache = home.join(".cargo/registry/cache");
-        if cargo_cache.exists() {
-            targets.push((ScanCategory::DeveloperCaches, cargo_cache, "Rust Cargo Registry .crate Archives"));
-        }
-        let gradle_cache = home.join(".gradle/caches");
-        if gradle_cache.exists() {
-            targets.push((ScanCategory::DeveloperCaches, gradle_cache, "Gradle Dependency Caches"));
-        }
-        let cocoapods_cache = home.join("Library/Caches/CocoaPods");
-        if cocoapods_cache.exists() {
-            targets.push((ScanCategory::DeveloperCaches, cocoapods_cache, "CocoaPods Specs & Pod Archives"));
-        }
-        let yarn_cache = home.join("Library/Caches/Yarn");
-        if yarn_cache.exists() {
-            targets.push((ScanCategory::DeveloperCaches, yarn_cache, "Yarn Package Cache"));
-        }
-        let npm_cache = home.join(".npm/_cacache");
-        if npm_cache.exists() {
-            targets.push((ScanCategory::DeveloperCaches, npm_cache, "NPM Package Cache"));
+        if config.include_developer_caches {
+            let cargo_registry = home.join(".cargo/registry/cache");
+            if cargo_registry.exists() {
+                targets.push((ScanCategory::DeveloperCaches, cargo_registry, "Rust Cargo Registry .crate Archives"));
+            }
+            let cargo_cache = home.join(".cargo/cache");
+            if cargo_cache.exists() {
+                targets.push((ScanCategory::DeveloperCaches, cargo_cache, "Rust Cargo Cache"));
+            }
+            let gradle_cache = home.join(".gradle/caches");
+            if gradle_cache.exists() {
+                targets.push((ScanCategory::DeveloperCaches, gradle_cache, "Gradle Dependency Caches"));
+            }
+            let cocoapods_cache = home.join("Library/Caches/CocoaPods");
+            if cocoapods_cache.exists() {
+                targets.push((ScanCategory::DeveloperCaches, cocoapods_cache, "CocoaPods Specs & Pod Archives"));
+            }
+            let yarn_cache = home.join("Library/Caches/Yarn");
+            if yarn_cache.exists() {
+                targets.push((ScanCategory::DeveloperCaches, yarn_cache, "Yarn Package Cache"));
+            }
+            let yarn_dotcache = home.join(".cache/yarn");
+            if yarn_dotcache.exists() {
+                targets.push((ScanCategory::DeveloperCaches, yarn_dotcache, "Yarn Global Cache"));
+            }
+            let npm_cache = home.join(".npm/_cacache");
+            if npm_cache.exists() {
+                targets.push((ScanCategory::DeveloperCaches, npm_cache, "NPM Package Cache"));
+            }
+            let pnpm_cache = home.join("Library/pnpm/store");
+            if pnpm_cache.exists() {
+                targets.push((ScanCategory::DeveloperCaches, pnpm_cache, "pnpm Store Cache"));
+            }
         }
 
         // 5. User Trash
-        let trash_dir = home.join(".Trash");
-        if trash_dir.exists() {
-            targets.push((ScanCategory::UserTrash, trash_dir, "macOS Trash Bin"));
+        if config.include_trash {
+            let trash_dir = home.join(".Trash");
+            if trash_dir.exists() {
+                targets.push((ScanCategory::UserTrash, trash_dir, "macOS Trash Bin"));
+            }
         }
 
-        // 6. Mail Downloads
-        let mail_downloads = home.join("Library/Containers/com.apple.mail/Data/Library/Mail Downloads");
-        if mail_downloads.exists() {
-            targets.push((ScanCategory::MailDownloads, mail_downloads, "Mail Preview Attachments"));
+        // 6. Mail Downloads (Narrowly scoped cache only)
+        if config.include_mail_downloads {
+            let mail_downloads = home.join("Library/Containers/com.apple.mail/Data/Library/Mail Downloads");
+            if mail_downloads.exists() {
+                targets.push((ScanCategory::MailDownloads, mail_downloads, "Mail Preview Attachments"));
+            }
+        }
+
+        // 7. Custom User-Selected Scopes
+        for custom in &config.custom_paths {
+            let cp = PathBuf::from(custom);
+            if cp.exists() && !SafetyGuard::is_mandatory_exclusion(&cp) {
+                targets.push((ScanCategory::SystemCaches, cp, "User Selected Folder"));
+            }
         }
 
         let total_targets = targets.len();
         let items_collector = Arc::new(Mutex::new(Vec::new()));
+        let skipped_collector = Arc::new(Mutex::new(Vec::new()));
         let scanned_count = Arc::new(Mutex::new(0usize));
         let running_bytes = Arc::new(Mutex::new(0u64));
         let was_cancelled = Arc::new(AtomicBool::new(false));
+        let user_exclusions = Arc::new(config.user_exclusions.clone());
 
         // Process targets in parallel with Rayon
         targets.into_par_iter().for_each(|(category, path, desc)| {
@@ -240,17 +469,34 @@ impl Scanner {
                 return;
             }
 
-            // Verify safety guard
-            if SafetyGuard::is_system_protected(&path) {
+            // Verify safety guard & mandatory exclusions
+            if SafetyGuard::is_mandatory_exclusion(&path) {
                 return;
             }
 
-            // User document guard
-            if SafetyGuard::is_user_data_protected(&path) {
-                return;
+            // User exclusion filter
+            let path_str = path.to_string_lossy().to_string();
+            for excl in user_exclusions.iter() {
+                if path_str.starts_with(excl) {
+                    return;
+                }
             }
 
-            let (size_bytes, file_count) = Self::measure_path(&path);
+            let mut visited_inodes = HashSet::new();
+            let mut skipped_paths = Vec::new();
+
+            let (size_bytes, file_count) = Self::measure_path_advanced(
+                &path,
+                &mut visited_inodes,
+                &mut skipped_paths,
+                &user_exclusions,
+                &cancel_token,
+            );
+
+            if !skipped_paths.is_empty() {
+                let mut skipped_lock = skipped_collector.lock().unwrap();
+                skipped_lock.extend(skipped_paths);
+            }
 
             if size_bytes > 0 {
                 let name = path
@@ -264,6 +510,8 @@ impl Scanner {
                     .and_then(|m| m.modified().ok())
                     .map(|t| chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339());
 
+                let classification = category.default_classification();
+
                 let item = ScanItem {
                     id,
                     path: path.to_string_lossy().to_string(),
@@ -273,8 +521,9 @@ impl Scanner {
                     file_count,
                     modified_at,
                     description: desc.to_string(),
-                    is_safe_to_clean: category.is_safe_by_default(),
-                    is_selected: category.is_safe_by_default(),
+                    is_safe_to_clean: classification == RiskClassification::SafeToClean,
+                    is_selected: classification == RiskClassification::SafeToClean,
+                    classification,
                 };
 
                 let mut list = items_collector.lock().unwrap();
@@ -289,57 +538,75 @@ impl Scanner {
             let current_count = *count;
             let current_bytes = *running_bytes.lock().unwrap();
 
+            // Progress percentage is calculated against configured target scopes
+            let percent = if total_targets > 0 {
+                (current_count as f32 / total_targets as f32) * 100.0
+            } else {
+                -1.0
+            };
+
             let progress = ScanProgress {
-                phase: "Scanning System Caches & Developer Space".into(),
+                phase: "Scanning Configured Scopes".into(),
                 current_category: category.display_name().into(),
                 current_path: path.to_string_lossy().to_string(),
                 items_found: items_collector.lock().unwrap().len(),
                 bytes_found: current_bytes,
-                percent_complete: if total_targets > 0 {
-                    (current_count as f32 / total_targets as f32) * 100.0
-                } else {
-                    100.0
-                },
+                percent_complete: percent,
             };
             progress_cb(progress);
         });
 
-        // Scan for Large Files in ~/Downloads (>100MB)
-        let downloads = home.join("Downloads");
-        if downloads.exists() && !cancel_token.load(Ordering::Relaxed) {
-            for entry in WalkDir::new(&downloads)
-                .max_depth(2)
-                .follow_links(false)
-                .into_iter()
-                .filter_map(|e| e.ok())
-            {
-                if cancel_token.load(Ordering::Relaxed) {
-                    was_cancelled.store(true, Ordering::Relaxed);
-                    break;
-                }
+        // 8. Large Files detection (explicit threshold, default >100MB in ~/Downloads)
+        if config.include_large_files && !cancel_token.load(Ordering::Relaxed) {
+            let threshold_bytes = config.large_files_min_mb.unwrap_or(100) * 1024 * 1024;
+            let downloads = home.join("Downloads");
 
-                let p = entry.path();
-                if p.is_file() {
-                    if let Ok(meta) = p.metadata() {
-                        let len = meta.len();
-                        // 100MB threshold
-                        if len >= 100 * 1024 * 1024 {
-                            let name = p.file_name().unwrap_or_default().to_string_lossy().to_string();
-                            let modified_at = meta.modified().ok().map(|t| chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339());
-                            let item = ScanItem {
-                                id: format!("large:{}", p.to_string_lossy()),
-                                path: p.to_string_lossy().to_string(),
-                                name,
-                                category: ScanCategory::LargeFiles,
-                                size_bytes: len,
-                                file_count: 1,
-                                modified_at,
-                                description: "Large file located in Downloads folder".into(),
-                                is_safe_to_clean: false, // Large files require manual review
-                                is_selected: false,
-                            };
-                            let mut list = items_collector.lock().unwrap();
-                            list.push(item);
+            if downloads.exists() {
+                for entry_res in WalkDir::new(&downloads)
+                    .max_depth(2)
+                    .follow_links(false)
+                    .into_iter()
+                {
+                    if cancel_token.load(Ordering::Relaxed) {
+                        was_cancelled.store(true, Ordering::Relaxed);
+                        break;
+                    }
+
+                    let entry = match entry_res {
+                        Ok(e) => e,
+                        Err(e) => {
+                            let p = e.path().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+                            skipped_collector.lock().unwrap().push(SkippedPath {
+                                path: p,
+                                reason: e.to_string(),
+                            });
+                            continue;
+                        }
+                    };
+
+                    let p = entry.path();
+                    if p.is_file() {
+                        if let Ok(meta) = p.symlink_metadata() {
+                            let len = meta.len();
+                            if len >= threshold_bytes {
+                                let name = p.file_name().unwrap_or_default().to_string_lossy().to_string();
+                                let modified_at = meta.modified().ok().map(|t| chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339());
+                                let item = ScanItem {
+                                    id: format!("large:{}", p.to_string_lossy()),
+                                    path: p.to_string_lossy().to_string(),
+                                    name,
+                                    category: ScanCategory::LargeFiles,
+                                    size_bytes: len,
+                                    file_count: 1,
+                                    modified_at,
+                                    description: "Large file located in Downloads folder".into(),
+                                    is_safe_to_clean: false, // Large files strictly require manual review
+                                    is_selected: false,
+                                    classification: RiskClassification::ReviewRequired,
+                                };
+                                let mut list = items_collector.lock().unwrap();
+                                list.push(item);
+                            }
                         }
                     }
                 }
@@ -347,13 +614,11 @@ impl Scanner {
         }
 
         let mut items = Arc::try_unwrap(items_collector).unwrap().into_inner().unwrap();
-        // Sort items by size descending
         items.sort_by_key(|a| std::cmp::Reverse(a.size_bytes));
 
         let total_bytes = items.iter().map(|i| i.size_bytes).sum();
         let total_items = items.len();
 
-        // Build category summaries
         let all_cats = [
             ScanCategory::SystemCaches,
             ScanCategory::ApplicationLogs,
@@ -384,12 +649,15 @@ impl Scanner {
             }
         }
 
+        let skipped_paths = Arc::try_unwrap(skipped_collector).unwrap().into_inner().unwrap();
+
         ScanResult {
             duration_ms: start_time.elapsed().as_millis() as u64,
             total_bytes,
             total_items,
             categories,
             items,
+            skipped_paths,
             was_cancelled: was_cancelled.load(Ordering::Relaxed),
         }
     }
@@ -408,6 +676,26 @@ mod tests {
     }
 
     #[test]
+    fn test_scanner_hardlink_deduplication() {
+        let temp = std::env::temp_dir().join("myclean_scanner_hardlink_test");
+        let _ = std::fs::remove_dir_all(&temp);
+        let _ = std::fs::create_dir_all(&temp);
+
+        let file1 = temp.join("original.bin");
+        std::fs::write(&file1, vec![0u8; 1024]).unwrap();
+
+        let file2 = temp.join("hardlink.bin");
+        std::fs::hard_link(&file1, &file2).unwrap();
+
+        let (size, count) = Scanner::measure_path(&temp);
+        // Even though there are 2 files pointing to the same data, total bytes counted should be 1024
+        assert_eq!(size, 1024);
+        assert_eq!(count, 2);
+
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
     fn test_scanner_execution_and_cancellation() {
         let cancel = Arc::new(AtomicBool::new(false));
         let cancel_clone = cancel.clone();
@@ -415,5 +703,12 @@ mod tests {
         let result = Scanner::scan(cancel_clone, |_prog| {});
         println!("Scan complete: found {} items, {} MB", result.total_items, result.total_bytes / (1024 * 1024));
         assert!(result.duration_ms > 0);
+    }
+
+    #[test]
+    fn test_scanner_immediate_cancellation() {
+        let cancel = Arc::new(AtomicBool::new(true)); // Pre-cancelled
+        let result = Scanner::scan(cancel, |_prog| {});
+        assert!(result.was_cancelled);
     }
 }
