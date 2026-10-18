@@ -37,12 +37,16 @@ pub struct Database {
 }
 
 impl Database {
-    /// Opens or initializes the SQLite database at `~/Library/Application Support/com.fluxcleaner.app/fluxcleaner.db`
+    /// Opens or initializes the SQLite database at `~/Library/Application Support/com.myclean.app/myclean.db`
+    /// Safely preserves and migrates legacy data from `com.fluxcleaner.app/fluxcleaner.db`
     pub fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let db_path = Self::get_db_path();
         if let Some(parent) = db_path.parent() {
             fs::create_dir_all(parent)?;
         }
+
+        // Safe migration from legacy database
+        Self::migrate_legacy_db(&db_path);
 
         let conn = Connection::open(&db_path)?;
         let db = Self {
@@ -50,6 +54,25 @@ impl Database {
         };
         db.init_schema()?;
         Ok(db)
+    }
+
+    /// Migrates data from legacy com.fluxcleaner.app if new database does not exist yet.
+    /// Preserves the legacy database intact; never deletes or silently overwrites.
+    fn migrate_legacy_db(new_db_path: &Path) {
+        if new_db_path.exists() {
+            return;
+        }
+
+        if let Some(data_dir) = dirs::data_dir() {
+            let legacy_path = data_dir.join("com.fluxcleaner.app").join("fluxcleaner.db");
+            if legacy_path.exists() {
+                if let Err(e) = fs::copy(&legacy_path, new_db_path) {
+                    eprintln!("Notice: Legacy DB copy skipped or encountered error: {}", e);
+                } else {
+                    println!("Successfully migrated legacy database from com.fluxcleaner.app to com.myclean.app");
+                }
+            }
+        }
     }
 
     /// In-memory database constructor for testing
@@ -64,9 +87,9 @@ impl Database {
 
     fn get_db_path() -> PathBuf {
         if let Some(data_dir) = dirs::data_dir() {
-            data_dir.join("com.fluxcleaner.app").join("fluxcleaner.db")
+            data_dir.join("com.myclean.app").join("myclean.db")
         } else {
-            PathBuf::from("fluxcleaner.db")
+            PathBuf::from("myclean.db")
         }
     }
 

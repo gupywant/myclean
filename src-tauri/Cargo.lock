@@ -866,27 +866,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "flux-cleaner"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "blake3",
- "chrono",
- "dirs 6.0.0",
- "rayon",
- "rusqlite",
- "serde",
- "serde_json",
- "sysinfo",
- "tauri",
- "tauri-build",
- "thiserror 2.0.21",
- "tokio",
- "trash",
- "walkdir",
-]
-
-[[package]]
 name = "fnv"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1955,6 +1934,27 @@ dependencies = [
  "serde",
  "thiserror 2.0.21",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "myclean"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "blake3",
+ "chrono",
+ "dirs 6.0.0",
+ "rayon",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sysinfo",
+ "tauri",
+ "tauri-build",
+ "thiserror 2.0.21",
+ "tokio",
+ "trash",
+ "walkdir",
 ]
 
 [[package]]

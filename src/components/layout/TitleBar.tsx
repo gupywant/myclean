@@ -18,7 +18,7 @@ export const TitleBar: React.FC = () => {
       <div className="flex items-center space-x-3 pl-18 mac-titlebar-no-drag">
         <div className="flex items-center space-x-2">
           <span className="text-xs font-semibold tracking-wider text-slate-300 uppercase">
-            Flux Cleaner
+            myclean
           </span>
           <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-indigo-500/15 text-indigo-400 border border-indigo-500/20">
             PRO

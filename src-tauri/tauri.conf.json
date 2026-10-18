@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Flux Cleaner",
+  "productName": "myclean",
   "version": "1.0.0",
-  "identifier": "com.fluxcleaner.app",
+  "identifier": "com.myclean.app",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Flux Cleaner",
+        "title": "myclean",
         "width": 1180,
         "height": 780,
         "minWidth": 980,

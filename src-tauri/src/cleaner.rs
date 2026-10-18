@@ -145,7 +145,7 @@ mod tests {
     #[test]
     fn test_cleaner_dry_run_and_safety() {
         let db = Database::in_memory().unwrap();
-        let temp = std::env::temp_dir().join("flux_clean_test");
+        let temp = std::env::temp_dir().join("myclean_clean_test");
         let _ = std::fs::remove_dir_all(&temp);
         std::fs::create_dir_all(&temp).unwrap();
 

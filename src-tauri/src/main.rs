@@ -1,5 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    flux_cleaner_lib::run();
+    myclean_lib::run();
 }

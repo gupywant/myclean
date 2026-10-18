@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let db = Database::new().expect("Failed to initialize Flux Cleaner SQLite database");
+    let db = Database::new().expect("Failed to initialize myclean SQLite database");
     let app_state = AppState {
         db: Arc::new(db),
         scan_cancel_token: Arc::new(AtomicBool::new(false)),

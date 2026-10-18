@@ -1,7 +1,7 @@
-# AGENTS.md — Flux Cleaner Engineering & Design Standards
+# AGENTS.md — myclean Engineering & Design Standards
 
 ## Application Identity
-**Flux Cleaner** is a high-performance, privacy-first macOS system cleaner and optimization studio with a Futuristic Premium interface. It combines ultra-fast Rust systems programming with a tactile, fluid desktop UI inspired by high-end macOS creative applications.
+**myclean** is a high-performance, privacy-first macOS system cleaner and optimization studio with a Futuristic Premium interface. It combines ultra-fast Rust systems programming with a tactile, fluid desktop UI inspired by high-end macOS creative applications.
 
 ---
 
@@ -66,7 +66,7 @@
    - Always verify path existence and permissions before attempting deletion.
 6. **Local Persistence & Privacy:**
    - Zero telemetry, zero external network calls.
-   - SQLite database stored securely in `~/Library/Application Support/com.fluxcleaner.app/fluxcleaner.db`.
+   - SQLite database stored securely in `~/Library/Application Support/com.myclean.app/myclean.db` (with automatic migration from legacy com.fluxcleaner.app).
    - Comprehensive audit log of every scan and clean action (freed bytes, timestamp, item count, dry-run flag).
    - User whitelist/ignore-list stored in SQLite.
 

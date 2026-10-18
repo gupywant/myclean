@@ -220,7 +220,7 @@ mod tests {
 
     #[test]
     fn test_duplicate_detection_flow() {
-        let temp_dir = std::env::temp_dir().join("flux_test_dups");
+        let temp_dir = std::env::temp_dir().join("myclean_test_dups");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).unwrap();
 

@@ -1,12 +1,12 @@
 [package]
-name = "flux-cleaner"
+name = "myclean"
 version = "0.1.0"
-description = "Flux Cleaner - High-Performance Privacy-First macOS Cleaner"
-authors = ["Flux Studio"]
+description = "myclean - High-Performance Privacy-First macOS Cleaner"
+authors = ["myclean Studio"]
 edition = "2021"
 
 [lib]
-name = "flux_cleaner_lib"
+name = "myclean_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
