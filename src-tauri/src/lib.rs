@@ -19,6 +19,7 @@ pub fn run() {
     let app_state = AppState {
         db: Arc::new(db),
         scan_cancel_token: Arc::new(AtomicBool::new(false)),
+        clean_cancel_token: Arc::new(AtomicBool::new(false)),
         duplicate_cancel_token: Arc::new(AtomicBool::new(false)),
         storage_cancel_token: Arc::new(AtomicBool::new(false)),
     };
@@ -30,6 +31,8 @@ pub fn run() {
             commands::start_scan,
             commands::cancel_scan,
             commands::clean_items,
+            commands::cancel_clean,
+            commands::check_active_applications,
             commands::scan_duplicates,
             commands::cancel_duplicate_scan,
             commands::scan_applications,

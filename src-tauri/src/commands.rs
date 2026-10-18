@@ -1,5 +1,5 @@
 use crate::apps::{AppInspector, InstalledApp};
-use crate::cleaner::{CleanRequest, CleanResult, Cleaner};
+use crate::cleaner::{ActiveAppWarning, CleanRequest, CleanResult, Cleaner};
 use crate::db::{CleanupRecord, Database, ScanRecord, WhitelistEntry};
 use crate::duplicates::{DuplicateScanResult, DuplicateScanner};
 use crate::scanner::{ScanProgress, ScanResult, ScanScopeConfig, Scanner};
@@ -13,6 +13,7 @@ use tauri::{AppHandle, Emitter, State};
 pub struct AppState {
     pub db: Arc<Database>,
     pub scan_cancel_token: Arc<AtomicBool>,
+    pub clean_cancel_token: Arc<AtomicBool>,
     pub duplicate_cancel_token: Arc<AtomicBool>,
     pub storage_cancel_token: Arc<AtomicBool>,
 }
@@ -73,10 +74,23 @@ pub async fn clean_items(
     state: State<'_, AppState>,
     request: CleanRequest,
 ) -> Result<CleanResult, String> {
+    state.clean_cancel_token.store(false, Ordering::Relaxed);
+    let cancel = state.clean_cancel_token.clone();
     let db = state.db.clone();
-    tokio::task::spawn_blocking(move || Cleaner::clean_items(request, &db))
+    tokio::task::spawn_blocking(move || Cleaner::clean_items(request, &db, cancel))
         .await
         .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub fn cancel_clean(state: State<'_, AppState>) -> bool {
+    state.clean_cancel_token.store(true, Ordering::Relaxed);
+    true
+}
+
+#[tauri::command]
+pub fn check_active_applications(paths: Vec<String>) -> Result<Vec<ActiveAppWarning>, String> {
+    Ok(Cleaner::check_active_applications(&paths))
 }
 
 #[tauri::command]
