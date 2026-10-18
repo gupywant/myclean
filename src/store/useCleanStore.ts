@@ -309,6 +309,21 @@ export const useCleanStore = create<CleanState>((set, get) => ({
       if (!state.duplicatesResult) return state;
       const nextGroups = state.duplicatesResult.groups.map((group) => {
         if (group.hash !== groupHash) return group;
+
+        const targetFile = group.files.find((f) => f.path === path);
+        if (!targetFile) return group;
+
+        // If toggling from keep (false) to remove (true), ensure at least one other file remains unselected
+        if (!targetFile.is_selected_for_removal) {
+          const remainingKept = group.files.filter(
+            (f) => f.path !== path && !f.is_selected_for_removal
+          );
+          if (remainingKept.length === 0) {
+            // Cannot mark all files in group for deletion
+            return group;
+          }
+        }
+
         return {
           ...group,
           files: group.files.map((file) =>

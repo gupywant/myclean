@@ -72,23 +72,23 @@ export const SettingsView: React.FC = () => {
             </div>
           </label>
 
-          <label className="flex items-start space-x-3 p-3 rounded-lg bg-white/[0.02] border border-white/[0.05] cursor-pointer hover:bg-white/[0.04] transition-colors">
+          <label className="flex items-start space-x-3 p-3 rounded-lg bg-white/[0.01] border border-white/[0.03] opacity-60 cursor-not-allowed transition-colors">
             <input
               type="radio"
               name="method"
-              checked={cleanupMethod === "permanent"}
-              onChange={() => setCleanupMethod("permanent")}
-              className="mt-1 text-indigo-600 focus:ring-0"
+              checked={false}
+              disabled={true}
+              className="mt-1 text-slate-600 cursor-not-allowed"
             />
             <div>
-              <div className="text-xs font-semibold text-white flex items-center space-x-2">
+              <div className="text-xs font-semibold text-slate-400 flex items-center space-x-2">
                 <span>Permanent Immediate Removal</span>
-                <span className="text-[10px] text-rose-400 bg-rose-500/10 px-1 rounded">
-                  Irreversible
+                <span className="text-[10px] text-amber-400 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.2 rounded font-mono">
+                  Disabled by Safety Guardrail
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400 mt-0.5">
-                Bypasses the trash bin and immediately unlinks disk blocks. Use only if space is critically exhausted.
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                Permanent unlinking is disabled to prevent unrecoverable data loss. All operations strictly route through macOS Recoverable Trash.
               </p>
             </div>
           </label>

@@ -16,7 +16,6 @@ export const ConfirmCleanModal: React.FC = () => {
     closeConfirmModal,
     scanResult,
     selectedItemIds,
-    cleanupMethod,
     dryRunMode,
     executeCleanup,
     isCleaning,
@@ -87,18 +86,10 @@ export const ConfirmCleanModal: React.FC = () => {
         </div>
 
         {/* Destination Note */}
-        <div className="p-3 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 text-xs flex items-center space-x-2">
-          <ArrowBendDownRight size={16} className="shrink-0 text-indigo-400" />
+        <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs flex items-center space-x-2.5">
+          <ArrowBendDownRight size={16} className="shrink-0 text-emerald-400" />
           <span>
-            {cleanupMethod === "trash" ? (
-              <>
-                Target items will be moved to <strong>macOS Trash Bin</strong> (fully recoverable).
-              </>
-            ) : (
-              <>
-                Target items will be <strong>permanently removed</strong> from the filesystem.
-              </>
-            )}
+            Target items will be moved to <strong>macOS Trash Bin</strong> (100% recoverable). Permanent unlinking is disabled to protect against data loss.
           </span>
         </div>
 

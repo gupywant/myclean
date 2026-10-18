@@ -8,7 +8,7 @@ use std::time::Instant;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CleanRequest {
     pub paths: Vec<String>,
-    pub method: String, // "trash" or "permanent"
+    pub method: String, // "trash" (permanent is disabled by safety guardrail)
     pub dry_run: bool,
     pub confirmed: bool,
 }
@@ -37,6 +37,11 @@ impl Cleaner {
         db: &Database,
     ) -> Result<CleanResult, String> {
         let start = Instant::now();
+
+        // Safety Guardrail: Permanent deletion is strictly disabled
+        if req.method == "permanent" {
+            return Err("Permanent deletion is disabled by safety policy. All cleanups are strictly routed through macOS Recoverable Trash.".to_string());
+        }
 
         if !req.confirmed && !req.dry_run {
             return Err("Execution rejected: Cleanup confirmation was not explicitly provided.".to_string());
@@ -67,17 +72,20 @@ impl Cleaner {
                 continue;
             }
 
-            // Check Safety Guard
-            if let Err(e) = SafetyGuard::validate_for_cleaning(&p) {
-                errors.push(CleanErrorItem {
-                    path: path_str.clone(),
-                    error_message: format!("Safety violation: {}", e),
-                });
-                continue;
-            }
+            // Safety Guard: Re-validate path and resolve canonical form to prevent race conditions & symlink swaps
+            let canonical = match SafetyGuard::validate_for_cleaning(&p) {
+                Ok(c) => c,
+                Err(e) => {
+                    errors.push(CleanErrorItem {
+                        path: path_str.clone(),
+                        error_message: format!("Safety violation: {}", e),
+                    });
+                    continue;
+                }
+            };
 
             // Measure size before deletion
-            let (size, count) = Scanner::measure_path(&p);
+            let (size, count) = Scanner::measure_path(&canonical);
 
             if req.dry_run {
                 bytes_freed += size;
@@ -85,19 +93,8 @@ impl Cleaner {
                 continue;
             }
 
-            // Execute deletion
-            let delete_result = if req.method == "permanent" {
-                if p.is_dir() {
-                    std::fs::remove_dir_all(&p)
-                } else {
-                    std::fs::remove_file(&p)
-                }
-            } else {
-                // Default: macOS Recoverable Trash
-                trash::delete(&p).map_err(|e| std::io::Error::other(e.to_string()))
-            };
-
-            match delete_result {
+            // Execute deletion: Strictly via macOS Trash for 100% recoverability
+            match trash::delete(&canonical).map_err(|e| std::io::Error::other(e.to_string())) {
                 Ok(_) => {
                     bytes_freed += size;
                     items_deleted += count.max(1);
@@ -106,7 +103,7 @@ impl Cleaner {
                 Err(e) => {
                     errors.push(CleanErrorItem {
                         path: path_str.clone(),
-                        error_message: format!("Failed to delete: {}", e),
+                        error_message: format!("Failed to move to Trash: {}", e),
                     });
                 }
             }
@@ -119,7 +116,7 @@ impl Cleaner {
                 timestamp: chrono::Utc::now().to_rfc3339(),
                 bytes_freed,
                 items_deleted,
-                method: req.method.clone(),
+                method: "trash".to_string(),
                 details_json: serde_json::to_string(&deleted_paths).unwrap_or_else(|_| "[]".into()),
             };
             let _ = db.insert_cleanup_record(&record);
@@ -166,5 +163,19 @@ mod tests {
         assert!(dummy_file.exists()); // Dry run must NOT delete
 
         let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn test_permanent_deletion_strictly_disabled() {
+        let db = Database::in_memory().unwrap();
+        let req = CleanRequest {
+            paths: vec!["/tmp/dummy".into()],
+            method: "permanent".into(),
+            dry_run: false,
+            confirmed: true,
+        };
+        let res = Cleaner::clean_items(req, &db);
+        assert!(res.is_err());
+        assert!(res.unwrap_err().contains("Permanent deletion is disabled"));
     }
 }
