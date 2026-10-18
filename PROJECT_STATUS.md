@@ -1,7 +1,7 @@
-# Flux Cleaner — Project Status
+# myclean — Project Status
 
 ## Project Overview
-**Flux Cleaner** is a privacy-first macOS cleaning application built with Tauri 2, Rust, React, TypeScript, Tailwind CSS v4, Motion, Phosphor Icons, and SQLite.
+**myclean** is a high-performance, privacy-first macOS cleaning studio built with Tauri 2, Rust systems programming, React 19, TypeScript, Tailwind CSS v4, Motion for React, Phosphor Icons, and SQLite.
 
 ---
 
@@ -31,11 +31,34 @@
 - [x] Build explicit Confirmation Modal with dry-run toggle and recovery guarantee (`ConfirmCleanModal.tsx`)
 - [x] Validate with `cargo check`, `cargo clippy -- -D warnings`, `cargo test` (9/9 passed), and `npm run build`
 
-### Phase 2: Enhanced Scanning & Deep Developer Clean Rules
-- [ ] Deep recursive `node_modules` project detection with last git commit age heuristic
-- [ ] Docker container, image, and build cache direct socket pruning
-- [ ] iOS DeviceSupport and older Simulator runtimes cleanup
-- [ ] Custom scan paths selector for user project repositories
+### Phase 02: Premium UI Polish, Branding & Safety Audit (Completed)
+- [x] **Complete Rebranding to myclean:**
+  - Updated application title, `productName`, and window chrome to `myclean`
+  - Updated bundle identifier to `com.myclean.app`
+  - Preserved legacy SQLite data through a non-destructive migration (`com.fluxcleaner.app/fluxcleaner.db` -> `com.myclean.app/myclean.db`)
+  - Generated premium Futuristic macOS icons (`32x32`, `128x128`, `128x128@2x`, `icon.png` 512x512)
+- [x] **Safety Audit & Hardening:**
+  - Filesystem path traversal protection (rejects paths containing `..` parent references)
+  - Canonicalization verification before all deletions to prevent symlink swaps and race conditions
+  - Symlink escape protection (refuses unlinking symlinks that resolve outside designated bounds)
+  - Active application guardrail (checks `sysinfo` running processes before allowing cleanup of application data)
+  - Hardened SIP / core system blacklist (`/System`, `/usr`, `/bin`, `/sbin`, `/private/var/db`, `/Library/Security`, `/Library/Keychains`)
+  - Hardened user privacy directories (`Keychains`, `Mail`, `Messages`, `Cookies`, `.ssh`, `.gnupg`, `.aws`, `.config/gh`)
+  - Protected active Git repositories (`.git/objects`, `.git/refs`, `.git/HEAD`)
+  - **Permanent deletion strictly disabled** in Rust engine and UI to prevent unrecoverable data loss
+  - Duplicate selection safeguards (guarantees at least 1 original file is preserved per duplicate group)
+  - Dry-run simulation fidelity verified
+- [x] **Futuristic Premium UI Polish & Performance:**
+  - CPU-optimized radar sweep (stops rotation when idle or when reduced motion is preferred)
+  - Motion accessibility support (`useReducedMotion` from `motion/react`)
+  - Clear classification badges across all views: `Safe to Clean`, `Review Required`, `Protected by Safety Guard`
+  - Separate display of Estimated Recoverable Space vs Lifetime Actual Reclaimed Storage
+  - Transparent IPC mode indicator (`Native Engine Active` vs `UI Preview Mode`) in TitleBar
+  - Polished hover springs, micro-interactions, and responsive layout
+- [x] **Validation:**
+  - `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings` (passed, 0 warnings)
+  - `cargo test --manifest-path src-tauri/Cargo.toml` (11/11 tests passed, 0 failures)
+  - `npm run build` (tsc & vite passed cleanly in 3.17s)
 
 ### Phase 3: Advanced Duplicate Detection & Visual Treemap
 - [ ] Interactive zoomable Disk Treemap visualization (Squarified layout in SVG)
@@ -44,7 +67,7 @@
 
 ### Phase 4: Application Uninstaller & Leftovers Deep Scan
 - [ ] Deep heuristic leftover scanner for orphaned preferences of deleted apps
-- [ ] Drag-and-drop `.app` onto Flux Cleaner window for instant uninstallation
+- [ ] Drag-and-drop `.app` onto myclean window for instant uninstallation
 - [ ] Total system application disk consumption analytics
 
 ### Phase 5: Distribution Packaging (.app & .dmg) & Release Readiness
