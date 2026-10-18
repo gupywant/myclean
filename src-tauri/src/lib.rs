@@ -5,6 +5,7 @@ pub mod db;
 pub mod duplicates;
 pub mod safety;
 pub mod scanner;
+pub mod storage;
 pub mod system;
 
 use commands::AppState;
@@ -19,6 +20,7 @@ pub fn run() {
         db: Arc::new(db),
         scan_cancel_token: Arc::new(AtomicBool::new(false)),
         duplicate_cancel_token: Arc::new(AtomicBool::new(false)),
+        storage_cancel_token: Arc::new(AtomicBool::new(false)),
     };
 
     tauri::Builder::default()
@@ -38,6 +40,9 @@ pub fn run() {
             commands::remove_from_whitelist,
             commands::get_app_setting,
             commands::set_app_setting,
+            commands::analyze_storage,
+            commands::cancel_storage_analysis,
+            commands::open_in_finder,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

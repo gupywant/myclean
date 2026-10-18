@@ -2,7 +2,8 @@ use crate::apps::{AppInspector, InstalledApp};
 use crate::cleaner::{CleanRequest, CleanResult, Cleaner};
 use crate::db::{CleanupRecord, Database, ScanRecord, WhitelistEntry};
 use crate::duplicates::{DuplicateScanResult, DuplicateScanner};
-use crate::scanner::{ScanProgress, ScanResult, Scanner};
+use crate::scanner::{ScanProgress, ScanResult, ScanScopeConfig, Scanner};
+use crate::storage::{StorageAnalysisResult, StorageAnalyzer};
 use crate::system::{SystemSummary, SystemTelemetry};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -13,6 +14,7 @@ pub struct AppState {
     pub db: Arc<Database>,
     pub scan_cancel_token: Arc<AtomicBool>,
     pub duplicate_cancel_token: Arc<AtomicBool>,
+    pub storage_cancel_token: Arc<AtomicBool>,
 }
 
 #[tauri::command]
@@ -26,14 +28,16 @@ pub async fn get_system_metrics() -> Result<SystemSummary, String> {
 pub async fn start_scan(
     app: AppHandle,
     state: State<'_, AppState>,
+    config: Option<ScanScopeConfig>,
 ) -> Result<ScanResult, String> {
     state.scan_cancel_token.store(false, Ordering::Relaxed);
     let cancel = state.scan_cancel_token.clone();
     let db = state.db.clone();
+    let scan_config = config.unwrap_or_default();
 
     let result = tokio::task::spawn_blocking(move || {
         let app_handle = app.clone();
-        let res = Scanner::scan(cancel, move |prog: ScanProgress| {
+        let res = Scanner::scan_with_config(scan_config, cancel, move |prog: ScanProgress| {
             let _ = app_handle.emit("scan:progress", &prog);
         });
 
@@ -171,3 +175,47 @@ pub fn set_app_setting(
 ) -> Result<(), String> {
     state.db.set_setting(&key, &value).map_err(|e| e.to_string())
 }
+
+#[tauri::command]
+pub async fn analyze_storage(
+    state: State<'_, AppState>,
+    path: Option<String>,
+    max_depth: Option<usize>,
+) -> Result<StorageAnalysisResult, String> {
+    state.storage_cancel_token.store(false, Ordering::Relaxed);
+    let cancel = state.storage_cancel_token.clone();
+
+    let target_path = path
+        .map(PathBuf::from)
+        .or_else(dirs::home_dir)
+        .unwrap_or_else(|| PathBuf::from("/"));
+
+    let depth = max_depth.unwrap_or(4);
+
+    tokio::task::spawn_blocking(move || {
+        StorageAnalyzer::analyze(target_path, depth, cancel)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub fn cancel_storage_analysis(state: State<'_, AppState>) -> bool {
+    state.storage_cancel_token.store(true, Ordering::Relaxed);
+    true
+}
+
+#[tauri::command]
+pub fn open_in_finder(path: String) -> Result<(), String> {
+    let p = std::path::Path::new(&path);
+    if !p.exists() {
+        return Err(format!("Path does not exist: {}", path));
+    }
+    std::process::Command::new("open")
+        .arg("-R")
+        .arg(&path)
+        .spawn()
+        .map_err(|e| format!("Failed to open in Finder: {}", e))?;
+    Ok(())
+}
+
