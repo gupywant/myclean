@@ -197,12 +197,12 @@ export const DuplicatesView: React.FC = () => {
                         </span>
                       )}
                       {file.is_selected_for_removal ? (
-                        <span className="text-[10px] uppercase font-bold text-rose-400 bg-rose-500/10 px-1.5 py-0.5 rounded border border-rose-500/20">
-                          Remove
+                        <span className="text-[10px] uppercase font-bold text-rose-400 bg-rose-500/10 px-2 py-0.5 rounded border border-rose-500/20">
+                          Clone to Trash
                         </span>
                       ) : (
-                        <span className="text-[10px] uppercase font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
-                          Keep Original
+                        <span className="text-[10px] uppercase font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                          Original Locked
                         </span>
                       )}
                     </div>

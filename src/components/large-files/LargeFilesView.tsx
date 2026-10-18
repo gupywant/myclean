@@ -98,6 +98,9 @@ export const LargeFilesView: React.FC = () => {
                     <span className="text-xs font-semibold text-white truncate">
                       {file.name}
                     </span>
+                    <span className="text-[10px] text-amber-400 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.2 rounded font-medium">
+                      Review Required
+                    </span>
                   </div>
                   <p className="text-[11px] text-slate-500 font-mono truncate">
                     {truncatePath(file.path, 55)}

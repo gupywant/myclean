@@ -1,6 +1,7 @@
 import React from "react";
 import { useFluxStore } from "../../store/useFluxStore";
 import { formatBytes } from "../../lib/utils";
+import { isTauriEnvironment } from "../../lib/api";
 import {
   Cpu,
   HardDrive,
@@ -31,12 +32,17 @@ export const TitleBar: React.FC = () => {
         {isScanning ? (
           <div className="flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/25 text-cyan-300">
             <CircleNotch size={13} className="animate-spin text-cyan-400" />
-            <span className="text-[11px] font-medium">Scanning Engine Active</span>
+            <span className="text-[11px] font-medium font-mono">Rust Engine Scanning</span>
+          </div>
+        ) : !isTauriEnvironment() ? (
+          <div className="flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-300">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+            <span className="text-[11px] font-medium">UI Preview Mode • Native IPC on macOS</span>
           </div>
         ) : (
           <div className="flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
             <ShieldCheck size={13} weight="fill" />
-            <span className="text-[11px] font-medium">Protected & Ready</span>
+            <span className="text-[11px] font-medium">SIP Shield Active • Trash Safe</span>
           </div>
         )}
       </div>

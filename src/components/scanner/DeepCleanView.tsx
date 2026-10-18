@@ -173,9 +173,13 @@ export const DeepCleanView: React.FC = () => {
                       <span className="text-xs font-semibold text-white truncate">
                         {item.name}
                       </span>
-                      {item.is_safe_to_clean && (
-                        <span className="inline-flex items-center text-[10px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1 rounded">
-                          Safe
+                      {item.is_safe_to_clean ? (
+                        <span className="inline-flex items-center text-[10px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.2 rounded font-medium">
+                          Safe to Clean
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center text-[10px] text-amber-400 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.2 rounded font-medium">
+                          Review Required
                         </span>
                       )}
                     </div>

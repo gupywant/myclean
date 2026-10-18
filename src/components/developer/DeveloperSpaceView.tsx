@@ -145,6 +145,9 @@ export const DeveloperSpaceView: React.FC = () => {
                     <span className="text-[10px] font-mono text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-1.5 py-0.2 rounded">
                       {item.category === "developer_xcode" ? "Xcode" : "Tooling"}
                     </span>
+                    <span className="text-[10px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.2 rounded font-medium">
+                      Safe to Clean
+                    </span>
                   </div>
                   <p className="text-[11px] text-slate-500 font-mono truncate">{item.path}</p>
                 </div>

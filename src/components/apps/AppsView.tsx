@@ -168,6 +168,15 @@ export const AppsView: React.FC = () => {
                               <span className="text-[10px] font-medium text-indigo-400 bg-indigo-500/10 px-1.5 py-0.5 rounded shrink-0">
                                 {art.kind}
                               </span>
+                              {art.kind === "Application Bundle" ? (
+                                <span className="text-[9px] font-medium text-slate-400 bg-white/[0.04] px-1 py-0.2 rounded shrink-0">
+                                  App Binary
+                                </span>
+                              ) : (
+                                <span className="text-[9px] font-medium text-emerald-400 bg-emerald-500/10 px-1 py-0.2 rounded shrink-0">
+                                  Safe to Clear
+                                </span>
+                              )}
                               <span className="font-mono text-[11px] text-slate-400 truncate">
                                 {truncatePath(art.path, 50)}
                               </span>
