@@ -5,6 +5,7 @@ import type {
   SystemSummary,
   ScanResult,
   ScanProgress,
+  ScanScopeConfig,
   CleanResult,
   DuplicateScanResult,
   InstalledApp,
@@ -12,6 +13,8 @@ import type {
   CleanupRecord,
   WhitelistEntry,
   ScanCategoryType,
+  StorageAnalysisResult,
+  StorageNode,
 } from "../types";
 
 interface CleanState {
@@ -19,11 +22,18 @@ interface CleanState {
   systemSummary: SystemSummary | null;
   isSystemLoading: boolean;
 
-  // System Scanner State
+  // System Scanner State & Config
   isScanning: boolean;
   scanProgress: ScanProgress | null;
   scanResult: ScanResult | null;
   selectedItemIds: Set<string>;
+  scanConfig: ScanScopeConfig;
+
+  // Storage Analyzer State
+  storageResult: StorageAnalysisResult | null;
+  isStorageAnalyzing: boolean;
+  activeDrillDownNode: StorageNode | null;
+  drillDownBreadcrumbs: StorageNode[];
 
   // Clean Execution State
   isCleaning: boolean;
@@ -49,6 +59,7 @@ interface CleanState {
   // Actions
   setActiveTab: (tab: NavigationTab) => void;
   fetchSystemSummary: () => Promise<void>;
+  setScanConfig: (config: Partial<ScanScopeConfig>) => void;
   startScan: () => Promise<void>;
   cancelScan: () => Promise<void>;
   toggleItemSelection: (id: string) => void;
@@ -60,6 +71,11 @@ interface CleanState {
   openConfirmModal: () => void;
   closeConfirmModal: () => void;
   executeCleanup: () => Promise<CleanResult | null>;
+  startStorageAnalysis: (path?: string, maxDepth?: number) => Promise<void>;
+  cancelStorageAnalysis: () => Promise<void>;
+  drillDownNode: (node: StorageNode) => void;
+  drillUpTo: (index: number) => void;
+  openInFinder: (path: string) => Promise<void>;
   scanDuplicates: (targetPath?: string, minSizeBytes?: number) => Promise<void>;
   cancelDuplicateScan: () => Promise<void>;
   toggleDuplicateFile: (groupHash: string, path: string) => void;
@@ -81,6 +97,25 @@ export const useCleanStore = create<CleanState>((set, get) => ({
   scanProgress: null,
   scanResult: null,
   selectedItemIds: new Set<string>(),
+  scanConfig: {
+    include_system_caches: true,
+    include_application_logs: true,
+    include_developer_xcode: true,
+    include_developer_caches: true,
+    include_browser_caches: true,
+    include_messaging_caches: true,
+    include_trash: true,
+    include_mail_downloads: true,
+    include_large_files: true,
+    large_files_min_mb: 100,
+    custom_paths: [],
+    user_exclusions: [],
+  },
+
+  storageResult: null,
+  isStorageAnalyzing: false,
+  activeDrillDownNode: null,
+  drillDownBreadcrumbs: [],
 
   isCleaning: false,
   lastCleanResult: null,
@@ -100,6 +135,12 @@ export const useCleanStore = create<CleanState>((set, get) => ({
   settings: {},
 
   setActiveTab: (tab) => set({ activeTab: tab }),
+
+  setScanConfig: (config) => {
+    set((state) => ({
+      scanConfig: { ...state.scanConfig, ...config },
+    }));
+  },
 
   fetchSystemSummary: async () => {
     set({ isSystemLoading: true });
@@ -130,7 +171,8 @@ export const useCleanStore = create<CleanState>((set, get) => ({
     });
 
     try {
-      const result = await api.startScan();
+      const config = get().scanConfig;
+      const result = await api.startScan(config);
       const defaultSelected = new Set<string>();
       result.items.forEach((item) => {
         if (item.is_selected) {
@@ -158,6 +200,57 @@ export const useCleanStore = create<CleanState>((set, get) => ({
   cancelScan: async () => {
     await api.cancelScan();
     set({ isScanning: false, scanProgress: null });
+  },
+
+  startStorageAnalysis: async (path?: string, maxDepth?: number) => {
+    set({ isStorageAnalyzing: true });
+    try {
+      const res = await api.analyzeStorage(path, maxDepth);
+      set({
+        storageResult: res,
+        activeDrillDownNode: res.root_node,
+        drillDownBreadcrumbs: [res.root_node],
+        isStorageAnalyzing: false,
+      });
+    } catch (err) {
+      console.error("Storage analysis failed:", err);
+      set({ isStorageAnalyzing: false });
+    }
+  },
+
+  cancelStorageAnalysis: async () => {
+    await api.cancelStorageAnalysis();
+    set({ isStorageAnalyzing: false });
+  },
+
+  drillDownNode: (node: StorageNode) => {
+    if (node.children && node.children.length > 0) {
+      set((state) => ({
+        activeDrillDownNode: node,
+        drillDownBreadcrumbs: [...state.drillDownBreadcrumbs, node],
+      }));
+    }
+  },
+
+  drillUpTo: (index: number) => {
+    set((state) => {
+      if (index >= 0 && index < state.drillDownBreadcrumbs.length) {
+        const nextCrumbs = state.drillDownBreadcrumbs.slice(0, index + 1);
+        return {
+          activeDrillDownNode: nextCrumbs[nextCrumbs.length - 1],
+          drillDownBreadcrumbs: nextCrumbs,
+        };
+      }
+      return state;
+    });
+  },
+
+  openInFinder: async (path: string) => {
+    try {
+      await api.openInFinder(path);
+    } catch (err) {
+      console.error("Failed to open in Finder:", err);
+    }
   },
 
   toggleItemSelection: (id: string) => {

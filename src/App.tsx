@@ -5,6 +5,7 @@ import { Sidebar } from "./components/layout/Sidebar";
 import { DashboardView } from "./components/dashboard/DashboardView";
 import { DeepCleanView } from "./components/scanner/DeepCleanView";
 import { DeveloperSpaceView } from "./components/developer/DeveloperSpaceView";
+import { StorageTreemapView } from "./components/treemap/StorageTreemapView";
 import { LargeFilesView } from "./components/large-files/LargeFilesView";
 import { DuplicatesView } from "./components/duplicates/DuplicatesView";
 import { AppsView } from "./components/apps/AppsView";
@@ -34,6 +35,7 @@ export const App: React.FC = () => {
         <main className="flex-1 flex flex-col bg-gradient-to-br from-[#07080D] via-[#090C16] to-[#0B0F1C] overflow-hidden">
           {activeTab === "dashboard" && <DashboardView />}
           {activeTab === "deep-clean" && <DeepCleanView />}
+          {activeTab === "storage-analyzer" && <StorageTreemapView />}
           {activeTab === "developer" && <DeveloperSpaceView />}
           {activeTab === "large-files" && <LargeFilesView />}
           {activeTab === "duplicates" && <DuplicatesView />}

@@ -4,6 +4,7 @@ import type {
   SystemSummary,
   ScanResult,
   ScanProgress,
+  ScanScopeConfig,
   CleanRequest,
   CleanResult,
   DuplicateScanResult,
@@ -11,6 +12,7 @@ import type {
   ScanRecord,
   CleanupRecord,
   WhitelistEntry,
+  StorageAnalysisResult,
 } from "../types";
 
 export const isTauriEnvironment = (): boolean => {
@@ -162,12 +164,12 @@ export const api = {
     return invoke<SystemSummary>("get_system_metrics");
   },
 
-  async startScan(): Promise<ScanResult> {
+  async startScan(config?: ScanScopeConfig): Promise<ScanResult> {
     if (!isTauriEnvironment()) {
       await new Promise((r) => setTimeout(r, 800));
       return MOCK_SCAN_RESULT;
     }
-    return invoke<ScanResult>("start_scan");
+    return invoke<ScanResult>("start_scan", { config });
   },
 
   async cancelScan(): Promise<boolean> {
@@ -339,4 +341,239 @@ export const api = {
     if (!isTauriEnvironment()) return;
     return invoke<void>("set_app_setting", { key, value });
   },
+
+  async analyzeStorage(path?: string, maxDepth?: number): Promise<StorageAnalysisResult> {
+    if (!isTauriEnvironment()) {
+      await new Promise((r) => setTimeout(r, 700));
+      return MOCK_STORAGE_RESULT;
+    }
+    return invoke<StorageAnalysisResult>("analyze_storage", { path, maxDepth });
+  },
+
+  async cancelStorageAnalysis(): Promise<boolean> {
+    if (!isTauriEnvironment()) return true;
+    return invoke<boolean>("cancel_storage_analysis");
+  },
+
+  async openInFinder(path: string): Promise<void> {
+    if (!isTauriEnvironment()) {
+      console.log(`[Preview Mode] Revealed in Finder: ${path}`);
+      return;
+    }
+    return invoke<void>("open_in_finder", { path });
+  },
 };
+
+const MOCK_STORAGE_RESULT: StorageAnalysisResult = {
+  root_path: "/Users/user",
+  duration_ms: 1240,
+  volume: {
+    name: "Macintosh HD",
+    mount_point: "/",
+    total_bytes: 1000204886016,
+    available_bytes: 428456900000,
+    used_bytes: 571747986016,
+    file_system: "apfs",
+    is_removable: false,
+  },
+  root_node: {
+    id: "/Users/user",
+    name: "user",
+    path: "/Users/user",
+    node_type: "directory",
+    allocated_bytes: 184589201920,
+    logical_bytes: 192589201920,
+    file_count: 85400,
+    file_type: null,
+    classification: "review_required",
+    children: [
+      {
+        id: "/Users/user/Library",
+        name: "Library",
+        path: "/Users/user/Library",
+        node_type: "directory",
+        allocated_bytes: 84500000000,
+        logical_bytes: 86500000000,
+        file_count: 42000,
+        file_type: null,
+        classification: "review_required",
+        children: [
+          {
+            id: "/Users/user/Library/Developer",
+            name: "Developer",
+            path: "/Users/user/Library/Developer",
+            node_type: "directory",
+            allocated_bytes: 42000000000,
+            logical_bytes: 43000000000,
+            file_count: 24000,
+            file_type: "developer",
+            classification: "safe_to_clean",
+            children: [],
+          },
+          {
+            id: "/Users/user/Library/Caches",
+            name: "Caches",
+            path: "/Users/user/Library/Caches",
+            node_type: "directory",
+            allocated_bytes: 28500000000,
+            logical_bytes: 29500000000,
+            file_count: 14000,
+            file_type: "system_caches",
+            classification: "safe_to_clean",
+            children: [],
+          },
+        ],
+      },
+      {
+        id: "/Users/user/Downloads",
+        name: "Downloads",
+        path: "/Users/user/Downloads",
+        node_type: "directory",
+        allocated_bytes: 48000000000,
+        logical_bytes: 49000000000,
+        file_count: 320,
+        file_type: "archives",
+        classification: "review_required",
+        children: [],
+      },
+      {
+        id: "/Users/user/Code",
+        name: "Code",
+        path: "/Users/user/Code",
+        node_type: "directory",
+        allocated_bytes: 32000000000,
+        logical_bytes: 33000000000,
+        file_count: 35000,
+        file_type: "developer",
+        classification: "review_required",
+        children: [],
+      },
+      {
+        id: "/Users/user/Documents",
+        name: "Documents",
+        path: "/Users/user/Documents",
+        node_type: "directory",
+        allocated_bytes: 20089201920,
+        logical_bytes: 24089201920,
+        file_count: 4080,
+        file_type: "documents",
+        classification: "protected",
+        children: [],
+      },
+    ],
+  },
+  largest_files: [
+    {
+      path: "/Users/user/Downloads/macOS_Sequoia_Installer.dmg",
+      name: "macOS_Sequoia_Installer.dmg",
+      is_dir: false,
+      allocated_bytes: 14200000000,
+      logical_bytes: 14200000000,
+      file_count: 1,
+      file_type: "archives",
+      classification: "review_required",
+      modified_at: new Date(Date.now() - 86400000 * 12).toISOString(),
+    },
+    {
+      path: "/Users/user/Library/Developer/Xcode/iOS DeviceSupport/18.2/Symbols.tar",
+      name: "Symbols.tar",
+      is_dir: false,
+      allocated_bytes: 8400000000,
+      logical_bytes: 8400000000,
+      file_count: 1,
+      file_type: "developer",
+      classification: "safe_to_clean",
+      modified_at: new Date(Date.now() - 86400000 * 5).toISOString(),
+    },
+    {
+      path: "/Users/user/Downloads/Archive_Project_Backups.zip",
+      name: "Archive_Project_Backups.zip",
+      is_dir: false,
+      allocated_bytes: 5200000000,
+      logical_bytes: 5200000000,
+      file_count: 1,
+      file_type: "archives",
+      classification: "review_required",
+      modified_at: new Date(Date.now() - 86400000 * 25).toISOString(),
+    },
+  ],
+  largest_folders: [
+    {
+      path: "/Users/user/Library/Developer/Xcode/DerivedData",
+      name: "DerivedData",
+      is_dir: true,
+      allocated_bytes: 38000000000,
+      logical_bytes: 39000000000,
+      file_count: 18000,
+      file_type: "developer",
+      classification: "safe_to_clean",
+      modified_at: null,
+    },
+    {
+      path: "/Users/user/Library/Caches/Google/Chrome",
+      name: "Chrome",
+      is_dir: true,
+      allocated_bytes: 12400000000,
+      logical_bytes: 12800000000,
+      file_count: 9200,
+      file_type: "system_caches",
+      classification: "safe_to_clean",
+      modified_at: null,
+    },
+  ],
+  file_type_distribution: [
+    {
+      category: "developer",
+      display_name: "Developer & Code",
+      total_allocated_bytes: 74000000000,
+      total_logical_bytes: 76000000000,
+      file_count: 59000,
+      percentage: 40.1,
+    },
+    {
+      category: "archives",
+      display_name: "Archives & Disk Images",
+      total_allocated_bytes: 48000000000,
+      total_logical_bytes: 49000000000,
+      file_count: 420,
+      percentage: 26.0,
+    },
+    {
+      category: "system_caches",
+      display_name: "Caches, Logs & Temp",
+      total_allocated_bytes: 28500000000,
+      total_logical_bytes: 29500000000,
+      file_count: 14000,
+      percentage: 15.4,
+    },
+    {
+      category: "documents",
+      display_name: "Documents & Office",
+      total_allocated_bytes: 20089201920,
+      total_logical_bytes: 24089201920,
+      file_count: 4080,
+      percentage: 10.9,
+    },
+    {
+      category: "media",
+      display_name: "Audio, Video & Photos",
+      total_allocated_bytes: 14000000000,
+      total_logical_bytes: 14000000000,
+      file_count: 7900,
+      percentage: 7.6,
+    },
+  ],
+  coverage: {
+    analyzed_allocated_bytes: 184589201920,
+    analyzed_logical_bytes: 192589201920,
+    total_files_analyzed: 85400,
+    total_dirs_analyzed: 12400,
+    inaccessible_paths_count: 0,
+    inaccessible_paths: [],
+    volume_total_bytes: 1000204886016,
+    volume_available_bytes: 428456900000,
+    coverage_percentage: 18.5,
+  },
+  was_cancelled: false,
+};
+

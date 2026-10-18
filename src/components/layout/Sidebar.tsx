@@ -6,6 +6,7 @@ import {
   House,
   Broom,
   Code,
+  ChartPieSlice,
   FileArchive,
   CopySimple,
   AppWindow,
@@ -25,6 +26,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { id: "dashboard", label: "Overview", icon: House },
   { id: "deep-clean", label: "Deep Clean", icon: Broom },
+  { id: "storage-analyzer", label: "Storage Analyzer", icon: ChartPieSlice, badge: "Treemap" },
   { id: "developer", label: "Developer Space", icon: Code, badge: "Dev" },
   { id: "large-files", label: "Large & Old Files", icon: FileArchive },
   { id: "duplicates", label: "Duplicate Finder", icon: CopySimple },

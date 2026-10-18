@@ -2,11 +2,29 @@ export type NavigationTab =
   | "dashboard"
   | "deep-clean"
   | "developer"
+  | "storage-analyzer"
   | "large-files"
   | "duplicates"
   | "apps"
   | "history"
   | "settings";
+
+export type RiskClassification = "safe_to_clean" | "review_required" | "protected";
+
+export interface ScanScopeConfig {
+  include_system_caches: boolean;
+  include_application_logs: boolean;
+  include_developer_xcode: boolean;
+  include_developer_caches: boolean;
+  include_browser_caches: boolean;
+  include_messaging_caches: boolean;
+  include_trash: boolean;
+  include_mail_downloads: boolean;
+  include_large_files: boolean;
+  large_files_min_mb?: number;
+  custom_paths: string[];
+  user_exclusions: string[];
+}
 
 export interface DiskMetric {
   name: String;
@@ -63,6 +81,7 @@ export interface ScanItem {
   description: string;
   is_safe_to_clean: boolean;
   is_selected: boolean;
+  classification?: RiskClassification;
 }
 
 export interface CategorySummary {
@@ -72,6 +91,11 @@ export interface CategorySummary {
   total_bytes: number;
   item_count: number;
   is_safe_by_default: boolean;
+}
+
+export interface SkippedPath {
+  path: string;
+  reason: string;
 }
 
 export interface ScanProgress {
@@ -89,6 +113,85 @@ export interface ScanResult {
   total_items: number;
   categories: CategorySummary[];
   items: ScanItem[];
+  skipped_paths?: SkippedPath[];
+  was_cancelled: boolean;
+}
+
+export type StorageNodeType = "directory" | "file" | "symlink";
+
+export type FileTypeCategory =
+  | "developer"
+  | "media"
+  | "archives"
+  | "documents"
+  | "system_caches"
+  | "other";
+
+export interface FileTypeBreakdown {
+  category: FileTypeCategory;
+  display_name: string;
+  total_allocated_bytes: number;
+  total_logical_bytes: number;
+  file_count: number;
+  percentage: number;
+}
+
+export interface StorageNode {
+  id: string;
+  name: string;
+  path: string;
+  node_type: StorageNodeType;
+  allocated_bytes: number;
+  logical_bytes: number;
+  file_count: number;
+  file_type: FileTypeCategory | null;
+  children: StorageNode[];
+  classification: RiskClassification;
+}
+
+export interface LargestItem {
+  path: string;
+  name: string;
+  is_dir: boolean;
+  allocated_bytes: number;
+  logical_bytes: number;
+  file_count: number;
+  file_type: FileTypeCategory | null;
+  classification: RiskClassification;
+  modified_at: string | null;
+}
+
+export interface VolumeInfo {
+  name: string;
+  mount_point: string;
+  total_bytes: number;
+  available_bytes: number;
+  used_bytes: number;
+  file_system: string;
+  is_removable: boolean;
+}
+
+export interface StorageAnalysisCoverage {
+  analyzed_allocated_bytes: number;
+  analyzed_logical_bytes: number;
+  total_files_analyzed: number;
+  total_dirs_analyzed: number;
+  inaccessible_paths_count: number;
+  inaccessible_paths: SkippedPath[];
+  volume_total_bytes: number;
+  volume_available_bytes: number;
+  coverage_percentage: number;
+}
+
+export interface StorageAnalysisResult {
+  root_path: string;
+  duration_ms: number;
+  volume: VolumeInfo | null;
+  root_node: StorageNode;
+  largest_files: LargestItem[];
+  largest_folders: LargestItem[];
+  file_type_distribution: FileTypeBreakdown[];
+  coverage: StorageAnalysisCoverage;
   was_cancelled: boolean;
 }
 

@@ -5,10 +5,12 @@ import {
   FileArchive,
   Trash,
   Warning,
+  ArrowSquareOut,
+  MinusCircle,
 } from "@phosphor-icons/react";
 
 export const LargeFilesView: React.FC = () => {
-  const { scanResult, cleanSpecificPaths, isCleaning } = useFluxStore();
+  const { scanResult, cleanSpecificPaths, isCleaning, openInFinder, addWhitelist } = useFluxStore();
   const [minSizeMB, setMinSizeMB] = useState<number>(100);
 
   const largeFiles = scanResult
@@ -20,6 +22,12 @@ export const LargeFilesView: React.FC = () => {
   const handleClean = async (path: string, name: string) => {
     if (confirm(`Send "${name}" to macOS Trash?`)) {
       await cleanSpecificPaths([path]);
+    }
+  };
+
+  const handleExclude = async (path: string, name: string) => {
+    if (confirm(`Exclude "${name}" from all future scans?`)) {
+      await addWhitelist(path, `Excluded from Large Files: ${name}`);
     }
   };
 
@@ -118,14 +126,30 @@ export const LargeFilesView: React.FC = () => {
                       </span>
                     )}
                   </div>
-                  <button
-                    onClick={() => handleClean(file.path, file.name)}
-                    disabled={isCleaning}
-                    className="p-2 rounded-lg bg-white/[0.03] hover:bg-rose-500/20 text-slate-400 hover:text-rose-300 border border-white/[0.06] transition-colors"
-                    title="Send to macOS Trash"
-                  >
-                    <Trash size={15} />
-                  </button>
+                  <div className="flex items-center space-x-1.5">
+                    <button
+                      onClick={() => openInFinder(file.path)}
+                      className="p-2 rounded-lg bg-white/[0.03] hover:bg-indigo-600/20 text-slate-400 hover:text-indigo-300 border border-white/[0.06] transition-colors"
+                      title="Reveal in Finder"
+                    >
+                      <ArrowSquareOut size={15} />
+                    </button>
+                    <button
+                      onClick={() => handleExclude(file.path, file.name)}
+                      className="p-2 rounded-lg bg-white/[0.03] hover:bg-amber-500/20 text-slate-400 hover:text-amber-300 border border-white/[0.06] transition-colors"
+                      title="Exclude from future scans"
+                    >
+                      <MinusCircle size={15} />
+                    </button>
+                    <button
+                      onClick={() => handleClean(file.path, file.name)}
+                      disabled={isCleaning}
+                      className="p-2 rounded-lg bg-white/[0.03] hover:bg-rose-500/20 text-slate-400 hover:text-rose-300 border border-white/[0.06] transition-colors"
+                      title="Send to macOS Trash"
+                    >
+                      <Trash size={15} />
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}
