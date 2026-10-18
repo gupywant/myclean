@@ -60,17 +60,61 @@
   - `cargo test --manifest-path src-tauri/Cargo.toml` (11/11 tests passed, 0 failures)
   - `npm run build` (tsc & vite passed cleanly in 3.17s)
 
-### Phase 3: Advanced Duplicate Detection & Visual Treemap
-- [ ] Interactive zoomable Disk Treemap visualization (Squarified layout in SVG)
-- [ ] File type categorization and quick thumbnail previews
-- [ ] Side-by-side binary/text diff previews for duplicates
+### Phase 03: Advanced Filesystem Scanner, Safe Scopes & Interactive Storage Analyzer (Completed)
+- [x] **Safe Scopes & Mandatory Exclusion Engine (`safety.rs`):**
+  - Formally implemented `SafetyGuard::is_mandatory_exclusion` rejecting: SIP (`/System`, `/usr`, `/bin`, `/sbin`, `/private/var/db`), `/Library/Keychains`, `/Library/Security`, User Keychains, Mail (`~/Library/Mail`), Messages (`~/Library/Messages`), iCloud Drive (`~/Library/Mobile Documents`), Docker VM disks (`com.docker.docker/Data/vms`, `.raw`), Time Machine backups, `.git` internals, and unapproved broad `/private/var/folders`.
+  - Enforced restricted cache-only traversal for `~/Library/Containers` and `~/Library/Group Containers`.
+  - Added `SafetyGuard::symlink_escapes_boundary` to prevent symlinks from escaping authorized search roots.
+- [x] **Advanced Parallel Filesystem Scanner (`scanner.rs`):**
+  - Configurable scan scopes (`ScanScopeConfig`) with read-only Smart Scan by default.
+  - Hard-link deduplication tracking inode tuples `(dev, ino)` to prevent double-counting storage on APFS.
+  - Symlink safety: `follow_links(false)` with explicit boundary verification.
+  - Filesystem boundary restrictions: verifies `dev() == root_dev` to prevent traversing across mount boundaries into external drives unless explicitly targeted.
+  - Comprehensive permission error capture: records `skipped_paths` without aborting scan.
+  - Safe risk classification tagging: `SafeToClean`, `ReviewRequired`, and `Protected`.
+  - True progress streaming over Tauri IPC with cancellation token checks on every iteration.
+- [x] **Real macOS Storage Analyzer Engine (`storage.rs`):**
+  - Mounted volume detection (`VolumeInfo`) reading file system type, capacity, used, and available space.
+  - Precise physical block allocation measurement (`blocks * 512`) vs logical file size (`len`), accurately exposing APFS sparse compression and clone savings.
+  - File type categorization engine: Developer & Code, Media & Audio/Video, Archives & Disk Images, Documents, System Caches, and Other.
+  - Aggregation of Top 50 Largest Files and Top 25 Largest Folders with risk classifications.
+  - Hierarchical tree generation (`StorageNode`) tailored for treemap visualization with bounded memory depth.
+  - Registered Tauri commands: `analyze_storage`, `cancel_storage_analysis`, and `open_in_finder` (native `open -R`).
+- [x] **Futuristic Premium UI & Squarified Treemap (`StorageTreemapView.tsx`, `SquarifiedTreemap.tsx`):**
+  - Interactive SVG Squarified Treemap (Bruls, Huizing, and van Wijk algorithm) with responsive dynamic resizing.
+  - Folder drill-down with breadcrumb navigation trail (`/ > Users > user > Library > Developer ...`) and "Up One Level" jump.
+  - Color-coded glowing neon tiles based on safety classification and file types.
+  - Rich hover tooltip displaying path, allocated vs logical size, and click-to-drill-down hints.
+  - Tabbed inspector: Treemap, File Type distribution bar & statistics, Largest Files table with "Reveal in Finder" and "Exclude from future scans".
+  - Enhanced `LargeFilesView.tsx` with "Reveal in Finder" (`open -R`) and exclusion controls.
+- [x] **Automated Tests & Validation:**
+  - `cargo test` passing 20/20 tests (hard-link deduplication, symlink avoidance, mandatory exclusions, cancellation under deep trees, APFS allocation, sqlite persistence).
+  - `cargo clippy -- -D warnings` passing cleanly with 0 warnings.
+  - `npm run build` passing cleanly in Vite + TypeScript.
 
-### Phase 4: Application Uninstaller & Leftovers Deep Scan
+### Phase 04: Safe Cache & Junk Cleanup
+- [ ] Safe trash-backed cache cleaner with dry-run verification
+- [ ] Orphaned cache detector and broken symlink remover
+
+### Phase 05: Duplicate Finder
+- [ ] Side-by-side binary/text diff previews for duplicates
+- [ ] Smart duplicate selection heuristics (keep highest resolution / newest / oldest)
+
+### Phase 06: App Uninstaller & Unused Data
 - [ ] Deep heuristic leftover scanner for orphaned preferences of deleted apps
 - [ ] Drag-and-drop `.app` onto myclean window for instant uninstallation
-- [ ] Total system application disk consumption analytics
 
-### Phase 5: Distribution Packaging (.app & .dmg) & Release Readiness
+### Phase 07: Developer & Docker Cleaner
+- [ ] Docker VM analysis via Docker CLI/API (not raw VM disks)
+- [ ] Node modules & Cargo target cleaner
+
+### Phase 08: Settings & Cleanup History
+- [ ] Full audit trail viewer and custom exclusion editor
+
+### Phase 09: Performance, Security & QA
+- [ ] End-to-end performance profiling and memory stress tests
+
+### Phase 10: macOS Universal Release
 - [ ] Apple Silicon (`aarch64`) and Intel (`x86_64`) Universal macOS binary compilation
-- [ ] Notarization and codesigning setup
-- [ ] DMG background styling and drag-to-Applications layout
+- [ ] Notarization and DMG packaging
+
