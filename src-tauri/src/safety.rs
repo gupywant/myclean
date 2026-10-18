@@ -393,15 +393,22 @@ impl SafetyGuard {
         running_apps
     }
 
+    /// Checks for path traversal attempts (relative '..' components)
+    pub fn check_path_traversal<P: AsRef<Path>>(path: P) -> Result<(), SafetyError> {
+        let p = path.as_ref();
+        if p.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+            return Err(SafetyError::PathTraversal(p.to_string_lossy().to_string()));
+        }
+        Ok(())
+    }
+
     /// Verifies that a path is safe for cleaning. Returns Err(SafetyError) if unsafe.
     pub fn validate_for_cleaning<P: AsRef<Path>>(path: P) -> Result<PathBuf, SafetyError> {
         let p = path.as_ref();
         let path_str = p.to_string_lossy().to_string();
 
         // 1. Path traversal check: reject any paths containing '..' relative components
-        if p.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
-            return Err(SafetyError::PathTraversal(path_str));
-        }
+        Self::check_path_traversal(p)?;
 
         if !p.exists() {
             return Err(SafetyError::NotFound(path_str));
