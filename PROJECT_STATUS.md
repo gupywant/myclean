@@ -92,9 +92,36 @@
   - `cargo clippy -- -D warnings` passing cleanly with 0 warnings.
   - `npm run build` passing cleanly in Vite + TypeScript.
 
-### Phase 04: Safe Cache & Junk Cleanup
-- [ ] Safe trash-backed cache cleaner with dry-run verification
-- [ ] Orphaned cache detector and broken symlink remover
+### Phase 04: Safe Cache & Junk Cleanup (Completed)
+- [x] **Conservative Rule-Based Classification Engine (`scanner.rs`, `safety.rs`):**
+  - Implemented `Scanner::classify_candidate_rule` assigning explicit detection rules (`RULE_SYSTEM_APP_CACHE`, `RULE_BROWSER_WEB_CACHE`, `RULE_APPLICATION_LOGS`, `RULE_XCODE_DERIVED_DATA`, `RULE_DEV_TOOLING_CACHE`, `RULE_MESSAGING_APP_CACHE`, `RULE_USER_TRASH_BIN`, `RULE_MAIL_PREVIEW_ATTACHMENTS`, `RULE_LARGE_USER_FILES`, `RULE_DATABASE_PROTECTED`, `RULE_ACTIVE_APP_RUNNING`, `RULE_MANDATORY_EXCLUSION`).
+  - Added disposable justification explanation (`disposable_reason`) and cleanup eligibility (`is_eligible_for_cleanup`, `ineligibility_reason`) to every candidate item.
+  - Required candidate metadata: file path, category, logical & allocated APFS sizes, last modification date, risk classification, detection rule identifier.
+  - Unknown or unrecognized files strictly default to `ReviewRequired` or `Protected`; never classified as safe based solely on file extension, name, or directory membership.
+- [x] **Hardened Safety Policies & Race Condition Guardrail (`safety.rs`, `cleaner.rs`):**
+  - Implemented `SafetyGuard::is_database_or_persistent_state` protecting SQLite databases (`.db`, `.sqlite`, `.sqlite3`, `.db-wal`, `.db-shm`), critical browser profiles, credentials, cookies (`Cookies`, `Cookies.binarycookies`), login data (`Login Data`), and preferences (`Bookmarks.plist`, `Preferences`).
+  - Scan-to-clean race condition mitigation: validates expected modification times and sizes before trashing to reject files altered after scanning.
+  - Strict canonical path validation: checks symlink escapes, parent directory traversal (`..`), SIP boundaries, and user privacy roots.
+  - Permanent deletion strictly disabled; no `rm -rf`; no automatic emptying of Trash.
+- [x] **Active Application Detection Guardrail (`safety.rs`, `cleaner.rs`, `commands.rs`):**
+  - Expanded `SafetyGuard::detect_running_application` with active desktop application signatures (Chrome, Brave, Edge, Firefox, Safari, Slack, Discord, Telegram, Teams, Spotify, Xcode, Cursor, Code, Docker).
+  - Pre-clean active application inspection command `check_active_applications` providing proactive warnings in the UI before execution.
+  - Runtime cleaning lock: immediately blocks cleanup and skips files if their associated application is actively running on macOS.
+- [x] **Native macOS Trash Integration & Dry-Run Workflow (`cleaner.rs`):**
+  - Strict recoverable deletion via native `trash::delete(&canonical)`.
+  - Post-deletion existence verification: checks `!canonical.exists()` after deletion attempt to catch locked files or permission failures.
+  - Itemized failure reporting returning `bytes_freed`, `bytes_moved_to_trash`, `items_deleted`, `items_skipped`, `items_failed`, and itemized error reasons.
+  - Cancellable execution checking `AtomicBool` between items to abort gracefully within milliseconds.
+  - Comprehensive SQLite audit logging storing detailed JSON payload (`CleanupAuditDetail`) in `myclean.db`.
+- [x] **Futuristic Premium UI Experience (`DeepCleanView.tsx`, `ConfirmCleanModal.tsx`, `useCleanStore.ts`):**
+  - Risk Classification filtering: `All Risks`, `Safe to Clean`, `Review Required`, `Protected`.
+  - Item cards displaying detection rule IDs, classification badges, and active application alerts.
+  - Candidate Inspector drawer presenting APFS allocated vs logical sizes, file counts, detection rule IDs, disposable justifications, last modified timestamps, and Reveal in Finder.
+  - Enhanced Confirmation Modal featuring a Dry-Run simulation toggle, active applications alert card, space breakdown, detection rules summary, and abort cleaning control.
+- [x] **Automated Tests & Verification:**
+  - 30/30 unit tests passing in `cargo test` (including race condition detection, persistent database rejection, dry-run simulation, cancellation, hard-link deduplication, candidate rule classification, symlink boundary checks).
+  - `cargo clippy -- -D warnings` passing with 0 warnings.
+  - `npm run build` (`tsc && vite build`) passing cleanly with 0 type errors.
 
 ### Phase 05: Duplicate Finder
 - [ ] Side-by-side binary/text diff previews for duplicates
