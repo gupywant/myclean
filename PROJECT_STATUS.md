@@ -153,9 +153,48 @@
   - `cargo clippy -- -D warnings` passing with 0 warnings.
   - `npm run build` (`tsc && vite build`) passing cleanly with 0 type errors.
 
-### Phase 06: App Uninstaller & Unused Data
-- [ ] Deep heuristic leftover scanner for orphaned preferences of deleted apps
-- [ ] Drag-and-drop `.app` onto myclean window for instant uninstallation
+### Phase 06: App Uninstaller & Unused Data (Completed)
+- [x] **Installed Application Discovery Engine:**
+  - Automated discovery across `/Applications`, `~/Applications`, and user-specified custom application paths.
+  - Robust XML and binary `bplist` `Info.plist` parser utilizing macOS `plutil` JSON conversion with fallback XML token extraction.
+  - Bundle metadata extraction: `bundle_id`, application name, short version string, publisher / copyright, installation source (System Application, Mac App Store, Homebrew Cask, User Installed), and running status.
+  - Native macOS `.icns` extraction via `sips` into 64x64 PNG base64 data URLs with disk caching in `~/Library/Caches/com.myclean.app/icons`.
+  - APFS physical allocated vs logical byte measurement for accurate application bundle sizes.
+  - Graceful fallback for malformed or missing plists without crashing or omitting applications.
+- [x] **Related Application Data Discovery & Confidence Classification:**
+  - Heuristic scanning of approved user Library locations: `Application Support`, `Caches`, `Preferences` (`.plist`), `Saved Application State` (`.savedState`), `HTTPStorages`, `WebKit`, `Logs`, and `Containers`.
+  - Confidence scoring:
+    - `High Confidence`: exact bundle identifier matches (e.g., `com.company.app`).
+    - `Review Required`: naming-only matches or ambiguous subfolders.
+    - `Protected`: system roots, persistent SQLite databases (`.sqlite`, `.db`), credentials, and user personal documents.
+  - Critical persistence preservation: SQLite databases, credentials, user profiles, and keychains are protected by default.
+- [x] **Active Application Protection & Running Process Locks:**
+  - Real-time running process and bundled helper detection via `sysinfo`.
+  - Blocks uninstallation if the application or any of its bundled helper processes is actively running.
+  - Refuses to force-quit running applications, preventing unsaved work loss or corrupt application state.
+- [x] **Orphaned Application Data Hunter:**
+  - Deep heuristic residual scanner for leftover preferences, caches, and saved states in `~/Library`.
+  - Cross-references identifiers against all user-installed and system applications to eliminate false positives.
+  - Safe removal with confirmation, dry-run simulation, and trash-only deletion.
+- [x] **Drag-and-Drop `.app` Inspection:**
+  - Instant drag-and-drop zone in UI and backend validation (`inspect_dropped_app`) for standalone `.app` bundles outside standard directories.
+- [x] **Safety Policies & Recovery Guarantee:**
+  - Protected macOS system applications (`/System/Applications`, `/Library/Apple`) cannot be uninstalled.
+  - Single-app uninstallation only; prevents blind bulk app deletion disasters.
+  - Recoverable deletion by default via macOS Trash (`trash::delete(&canonical)`); permanent deletion strictly disabled.
+  - Complete audit trail persisted to SQLite `cleanup_history`.
+- [x] **Futuristic Premium UI:**
+  - Installed Apps vs Orphaned Leftovers tabs with live count and footprint badges.
+  - Animated Drag-and-Drop target zone with spring feedback.
+  - Real extracted native application icons with glowing accent fallback.
+  - Active running process indicator pills with PID details.
+  - Expandable footprint breakdown by category (Bundle, Caches, App Support, Preferences, Saved State, Containers).
+  - Dedicated `AppUninstallModal` with dry-run toggle, active app detection warning, item selection, and celebratory cleanup feedback.
+- [x] **Automated Tests & Regression Coverage:**
+  - 50 tests passing (41 unit tests + 7 `apps_safety.rs` integration tests + 2 `duplicates_safety.rs` integration tests).
+  - Covers malformed plists, missing bundle IDs, system app rejection, unconfirmed request rejection, user document protection, dry-run simulation fidelity, and orphaned safety rejections.
+  - `cargo clippy -- -D warnings` passing with 0 warnings.
+  - `npm run build` (`tsc && vite build`) passing cleanly with 0 type errors.
 
 ### Phase 07: Developer & Docker Cleaner
 - [ ] Docker VM analysis via Docker CLI/API (not raw VM disks)
