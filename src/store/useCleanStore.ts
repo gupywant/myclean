@@ -15,6 +15,8 @@ import type {
   ScanCategoryType,
   StorageAnalysisResult,
   StorageNode,
+  ActiveAppWarning,
+  CleanItemTarget,
 } from "../types";
 
 interface CleanState {
@@ -41,6 +43,7 @@ interface CleanState {
   showConfirmModal: boolean;
   dryRunMode: boolean;
   cleanupMethod: "trash" | "permanent";
+  activeAppWarnings: ActiveAppWarning[];
 
   // Duplicates State
   duplicatesResult: DuplicateScanResult | null;
@@ -70,6 +73,8 @@ interface CleanState {
   setCleanupMethod: (method: "trash" | "permanent") => void;
   openConfirmModal: () => void;
   closeConfirmModal: () => void;
+  checkActiveAppsForSelected: () => Promise<ActiveAppWarning[]>;
+  cancelClean: () => Promise<void>;
   executeCleanup: () => Promise<CleanResult | null>;
   startStorageAnalysis: (path?: string, maxDepth?: number) => Promise<void>;
   cancelStorageAnalysis: () => Promise<void>;
@@ -122,6 +127,7 @@ export const useCleanStore = create<CleanState>((set, get) => ({
   showConfirmModal: false,
   dryRunMode: false,
   cleanupMethod: "trash",
+  activeAppWarnings: [],
 
   duplicatesResult: null,
   isDuplicateScanning: false,
@@ -296,16 +302,48 @@ export const useCleanStore = create<CleanState>((set, get) => ({
 
   setDryRunMode: (val) => set({ dryRunMode: val }),
   setCleanupMethod: (method) => set({ cleanupMethod: method }),
-  openConfirmModal: () => set({ showConfirmModal: true }),
+  openConfirmModal: () => {
+    set({ showConfirmModal: true });
+    get().checkActiveAppsForSelected();
+  },
   closeConfirmModal: () => set({ showConfirmModal: false }),
+
+  checkActiveAppsForSelected: async () => {
+    const { scanResult, selectedItemIds } = get();
+    if (!scanResult) return [];
+    const selectedPaths = scanResult.items
+      .filter((i) => selectedItemIds.has(i.id))
+      .map((i) => i.path);
+    if (selectedPaths.length === 0) {
+      set({ activeAppWarnings: [] });
+      return [];
+    }
+    try {
+      const warnings = await api.checkActiveApplications(selectedPaths);
+      set({ activeAppWarnings: warnings });
+      return warnings;
+    } catch (e) {
+      console.error("Failed to check active applications:", e);
+      return [];
+    }
+  },
+
+  cancelClean: async () => {
+    await api.cancelClean();
+    set({ isCleaning: false });
+  },
 
   executeCleanup: async () => {
     const { scanResult, selectedItemIds, cleanupMethod, dryRunMode } = get();
     if (!scanResult) return null;
 
-    const pathsToClean = scanResult.items
-      .filter((i) => selectedItemIds.has(i.id))
-      .map((i) => i.path);
+    const selectedItems = scanResult.items.filter((i) => selectedItemIds.has(i.id));
+    const pathsToClean = selectedItems.map((i) => i.path);
+    const targets: CleanItemTarget[] = selectedItems.map((i) => ({
+      path: i.path,
+      expected_modified_at: i.modified_at,
+      expected_size_bytes: i.size_bytes,
+    }));
 
     if (pathsToClean.length === 0) return null;
 
@@ -314,6 +352,7 @@ export const useCleanStore = create<CleanState>((set, get) => ({
     try {
       const result = await api.cleanItems({
         paths: pathsToClean,
+        targets,
         method: cleanupMethod,
         dry_run: dryRunMode,
         confirmed: true,
@@ -325,9 +364,11 @@ export const useCleanStore = create<CleanState>((set, get) => ({
       });
 
       // If actual clean was run, remove cleaned items from scanResult and update system metrics
-      if (!dryRunMode && result.success) {
+      if (!dryRunMode && result.items_deleted > 0) {
+        // Collect paths that failed or were skipped so they stay selected
+        const failedPaths = new Set(result.errors.map((e) => e.path));
         const remainingItems = scanResult.items.filter(
-          (i) => !selectedItemIds.has(i.id)
+          (i) => !selectedItemIds.has(i.id) || failedPaths.has(i.path)
         );
         const remainingBytes = remainingItems.reduce((acc, i) => acc + i.size_bytes, 0);
 
@@ -338,10 +379,12 @@ export const useCleanStore = create<CleanState>((set, get) => ({
             total_bytes: remainingBytes,
             total_items: remainingItems.length,
           },
-          selectedItemIds: new Set<string>(),
+          selectedItemIds: new Set(
+            remainingItems.filter((i) => failedPaths.has(i.path)).map((i) => i.id)
+          ),
         });
 
-        // Trigger updates
+        // Trigger telemetry updates
         get().fetchSystemSummary();
         get().fetchHistory();
       }

@@ -13,6 +13,7 @@ import type {
   CleanupRecord,
   WhitelistEntry,
   StorageAnalysisResult,
+  ActiveAppWarning,
 } from "../types";
 
 export const isTauriEnvironment = (): boolean => {
@@ -191,12 +192,28 @@ export const api = {
         success: true,
         dry_run: request.dry_run,
         bytes_freed: request.paths.length * 150000000,
+        bytes_moved_to_trash: request.dry_run ? 0 : request.paths.length * 150000000,
         items_deleted: request.paths.length,
+        items_skipped: 0,
+        items_failed: 0,
         errors: [],
         duration_ms: 320,
+        was_cancelled: false,
       };
     }
     return invoke<CleanResult>("clean_items", { request });
+  },
+
+  async cancelClean(): Promise<boolean> {
+    if (!isTauriEnvironment()) return true;
+    return invoke<boolean>("cancel_clean");
+  },
+
+  async checkActiveApplications(paths: string[]): Promise<ActiveAppWarning[]> {
+    if (!isTauriEnvironment()) {
+      return [];
+    }
+    return invoke<ActiveAppWarning[]>("check_active_applications", { paths });
   },
 
   async scanDuplicates(targetPath?: string, minSizeBytes?: number): Promise<DuplicateScanResult> {

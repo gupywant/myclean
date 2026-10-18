@@ -76,12 +76,19 @@ export interface ScanItem {
   name: string;
   category: ScanCategoryType;
   size_bytes: number;
+  allocated_bytes?: number;
+  logical_bytes?: number;
   file_count: number;
   modified_at: string | null;
   description: string;
   is_safe_to_clean: boolean;
   is_selected: boolean;
   classification?: RiskClassification;
+  detection_rule_id?: string;
+  disposable_reason?: string;
+  is_eligible_for_cleanup?: boolean;
+  ineligibility_reason?: string | null;
+  associated_app?: string | null;
 }
 
 export interface CategorySummary {
@@ -258,8 +265,20 @@ export interface WhitelistEntry {
   added_at: string;
 }
 
+export interface CleanItemTarget {
+  path: string;
+  expected_modified_at?: string | null;
+  expected_size_bytes?: number | null;
+}
+
+export interface ActiveAppWarning {
+  app_name: string;
+  affected_paths: string[];
+}
+
 export interface CleanRequest {
   paths: string[];
+  targets?: CleanItemTarget[];
   method: "trash" | "permanent";
   dry_run: boolean;
   confirmed: boolean;
@@ -274,7 +293,11 @@ export interface CleanResult {
   success: boolean;
   dry_run: boolean;
   bytes_freed: number;
+  bytes_moved_to_trash: number;
   items_deleted: number;
+  items_skipped: number;
+  items_failed: number;
   errors: CleanErrorItem[];
   duration_ms: number;
+  was_cancelled: boolean;
 }
