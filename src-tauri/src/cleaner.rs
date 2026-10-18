@@ -51,15 +51,15 @@ pub struct ActiveAppWarning {
     pub affected_paths: Vec<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct CleanupAuditDetail {
-    dry_run: bool,
-    items_deleted: usize,
-    items_skipped: usize,
-    items_failed: usize,
-    bytes_moved_to_trash: u64,
-    deleted_paths: Vec<String>,
-    errors: Vec<CleanErrorItem>,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CleanupAuditDetail {
+    pub dry_run: bool,
+    pub items_deleted: usize,
+    pub items_skipped: usize,
+    pub items_failed: usize,
+    pub bytes_moved_to_trash: u64,
+    pub deleted_paths: Vec<String>,
+    pub errors: Vec<CleanErrorItem>,
 }
 
 pub struct Cleaner;

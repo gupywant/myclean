@@ -1,11 +1,13 @@
-use crate::apps::{AppInspector, InstalledApp};
+use crate::apps::{
+    AppInspector, CleanOrphanedRequest, InstalledApp, OrphanedScanResult, UninstallAppRequest,
+};
 use crate::cleaner::{ActiveAppWarning, CleanRequest, CleanResult, Cleaner};
 use crate::db::{CleanupRecord, Database, ScanRecord, WhitelistEntry};
 use crate::duplicates::{CleanDuplicatesRequest, DuplicateScanProgress, DuplicateScanResult, DuplicateScanner};
 use crate::scanner::{ScanProgress, ScanResult, ScanScopeConfig, Scanner};
 use crate::storage::{StorageAnalysisResult, StorageAnalyzer};
 use crate::system::{SystemSummary, SystemTelemetry};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
@@ -147,10 +149,48 @@ pub fn cancel_duplicate_clean(state: State<'_, AppState>) -> bool {
 }
 
 #[tauri::command]
-pub async fn scan_applications() -> Result<Vec<InstalledApp>, String> {
-    tokio::task::spawn_blocking(AppInspector::scan_applications)
+pub async fn scan_applications(
+    custom_dirs: Option<Vec<String>>,
+) -> Result<Vec<InstalledApp>, String> {
+    tokio::task::spawn_blocking(move || AppInspector::scan_applications(custom_dirs))
         .await
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn scan_orphaned_data() -> Result<OrphanedScanResult, String> {
+    tokio::task::spawn_blocking(AppInspector::scan_orphaned_data)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn inspect_dropped_app(path: String) -> Result<InstalledApp, String> {
+    tokio::task::spawn_blocking(move || AppInspector::inspect_dropped_app(Path::new(&path)))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn uninstall_application(
+    state: State<'_, AppState>,
+    request: UninstallAppRequest,
+) -> Result<CleanResult, String> {
+    let db = state.db.clone();
+    tokio::task::spawn_blocking(move || AppInspector::uninstall_application(request, &db))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn clean_orphaned_data(
+    state: State<'_, AppState>,
+    request: CleanOrphanedRequest,
+) -> Result<CleanResult, String> {
+    let db = state.db.clone();
+    tokio::task::spawn_blocking(move || AppInspector::clean_orphaned_data(request, &db))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
