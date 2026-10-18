@@ -14,6 +14,8 @@ import type {
   WhitelistEntry,
   StorageAnalysisResult,
   ActiveAppWarning,
+  DuplicateScanProgress,
+  CleanDuplicatesRequest,
 } from "../types";
 
 export const isTauriEnvironment = (): boolean => {
@@ -216,31 +218,57 @@ export const api = {
     return invoke<ActiveAppWarning[]>("check_active_applications", { paths });
   },
 
+  async onDuplicateProgress(callback: (progress: DuplicateScanProgress) => void): Promise<UnlistenFn> {
+    if (!isTauriEnvironment()) {
+      return () => {};
+    }
+    return listen<DuplicateScanProgress>("duplicate:progress", (event) => callback(event.payload));
+  },
+
   async scanDuplicates(targetPath?: string, minSizeBytes?: number): Promise<DuplicateScanResult> {
     if (!isTauriEnvironment()) {
       await new Promise((r) => setTimeout(r, 900));
       return {
         duration_ms: 820,
         total_duplicate_groups: 2,
+        total_duplicate_files: 4,
         total_wasted_bytes: 420000000,
+        total_reclaimable_bytes: 420000000,
         was_cancelled: false,
         groups: [
           {
             hash: "3a9f8b2c1d0e4f5a6b7c8d9e0f1a2b3c",
             file_size: 210000000,
+            allocated_bytes: 210000000,
             wasted_bytes: 210000000,
+            reclaimable_bytes: 210000000,
+            has_hardlinks: false,
             files: [
               {
                 path: "/Users/user/Downloads/Archive_2026.zip",
                 name: "Archive_2026.zip",
+                file_size: 210000000,
+                allocated_bytes: 210000000,
                 modified_at: "2026-09-12T10:00:00Z",
                 is_selected_for_removal: false,
+                inode: 123456,
+                device: 16777220,
+                nlink: 1,
+                is_hardlink_copy: false,
+                is_suggested_original: true,
               },
               {
                 path: "/Users/user/Downloads/Archive_2026 (1).zip",
                 name: "Archive_2026 (1).zip",
+                file_size: 210000000,
+                allocated_bytes: 210000000,
                 modified_at: "2026-10-02T14:30:00Z",
-                is_selected_for_removal: true,
+                is_selected_for_removal: false,
+                inode: 123457,
+                device: 16777220,
+                nlink: 1,
+                is_hardlink_copy: false,
+                is_suggested_original: false,
               },
             ],
           },
@@ -256,6 +284,31 @@ export const api = {
   async cancelDuplicateScan(): Promise<boolean> {
     if (!isTauriEnvironment()) return true;
     return invoke<boolean>("cancel_duplicate_scan");
+  },
+
+  async cleanDuplicates(request: CleanDuplicatesRequest): Promise<CleanResult> {
+    if (!isTauriEnvironment()) {
+      await new Promise((r) => setTimeout(r, 600));
+      const totalPaths = request.groups.reduce((acc, g) => acc + g.paths_to_delete.length, 0);
+      return {
+        success: true,
+        dry_run: request.dry_run,
+        bytes_freed: totalPaths * 210000000,
+        bytes_moved_to_trash: request.dry_run ? 0 : totalPaths * 210000000,
+        items_deleted: totalPaths,
+        items_skipped: 0,
+        items_failed: 0,
+        errors: [],
+        duration_ms: 310,
+        was_cancelled: false,
+      };
+    }
+    return invoke<CleanResult>("clean_duplicates", { request });
+  },
+
+  async cancelDuplicateClean(): Promise<boolean> {
+    if (!isTauriEnvironment()) return true;
+    return invoke<boolean>("cancel_duplicate_clean");
   },
 
   async scanApplications(): Promise<InstalledApp[]> {

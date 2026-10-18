@@ -17,6 +17,8 @@ import type {
   StorageNode,
   ActiveAppWarning,
   CleanItemTarget,
+  DuplicateScanProgress,
+  DuplicateGroupCleanSelection,
 } from "../types";
 
 interface CleanState {
@@ -48,6 +50,12 @@ interface CleanState {
   // Duplicates State
   duplicatesResult: DuplicateScanResult | null;
   isDuplicateScanning: boolean;
+  duplicateProgress: DuplicateScanProgress | null;
+  duplicateTargetDir: string;
+  duplicateMinSize: number;
+  isDuplicateCleaning: boolean;
+  showDuplicateConfirmModal: boolean;
+  duplicateCleanResult: CleanResult | null;
 
   // Applications State
   installedApps: InstalledApp[];
@@ -81,10 +89,16 @@ interface CleanState {
   drillDownNode: (node: StorageNode) => void;
   drillUpTo: (index: number) => void;
   openInFinder: (path: string) => Promise<void>;
+  setDuplicateTargetDir: (dir: string) => void;
+  setDuplicateMinSize: (bytes: number) => void;
   scanDuplicates: (targetPath?: string, minSizeBytes?: number) => Promise<void>;
   cancelDuplicateScan: () => Promise<void>;
   toggleDuplicateFile: (groupHash: string, path: string) => void;
-  autoSelectDuplicates: (strategy: "keep_oldest" | "keep_newest") => void;
+  autoSelectDuplicates: (strategy: "keep_oldest" | "keep_newest" | "deselect_all") => void;
+  openDuplicateConfirmModal: () => void;
+  closeDuplicateConfirmModal: () => void;
+  executeDuplicateCleanup: () => Promise<CleanResult | null>;
+  cancelDuplicateClean: () => Promise<void>;
   scanApplications: () => Promise<void>;
   fetchHistory: () => Promise<void>;
   fetchWhitelist: () => Promise<void>;
@@ -131,6 +145,12 @@ export const useCleanStore = create<CleanState>((set, get) => ({
 
   duplicatesResult: null,
   isDuplicateScanning: false,
+  duplicateProgress: null,
+  duplicateTargetDir: "",
+  duplicateMinSize: 1024 * 1024,
+  isDuplicateCleaning: false,
+  showDuplicateConfirmModal: false,
+  duplicateCleanResult: null,
 
   installedApps: [],
   isAppsScanning: false,
@@ -424,20 +444,39 @@ export const useCleanStore = create<CleanState>((set, get) => ({
     }
   },
 
+  setDuplicateTargetDir: (dir: string) => set({ duplicateTargetDir: dir }),
+  setDuplicateMinSize: (bytes: number) => set({ duplicateMinSize: bytes }),
+
   scanDuplicates: async (targetPath, minSizeBytes) => {
-    set({ isDuplicateScanning: true });
+    const dir = targetPath ?? get().duplicateTargetDir;
+    const minSize = minSizeBytes ?? get().duplicateMinSize;
+
+    set({ isDuplicateScanning: true, duplicateProgress: null });
+
+    let unlisten: (() => void) | undefined;
     try {
-      const res = await api.scanDuplicates(targetPath, minSizeBytes);
-      set({ duplicatesResult: res, isDuplicateScanning: false });
+      unlisten = await api.onDuplicateProgress((progress) => {
+        set({ duplicateProgress: progress });
+      });
+
+      const res = await api.scanDuplicates(dir || undefined, minSize);
+      set({ duplicatesResult: res, isDuplicateScanning: false, duplicateProgress: null });
     } catch (err) {
       console.error("Duplicate scan error:", err);
-      set({ isDuplicateScanning: false });
+      set({ isDuplicateScanning: false, duplicateProgress: null });
+    } finally {
+      if (unlisten) {
+        unlisten();
+      }
     }
   },
 
   cancelDuplicateScan: async () => {
-    await api.cancelDuplicateScan();
-    set({ isDuplicateScanning: false });
+    try {
+      await api.cancelDuplicateScan();
+    } finally {
+      set({ isDuplicateScanning: false, duplicateProgress: null });
+    }
   },
 
   toggleDuplicateFile: (groupHash: string, path: string) => {
@@ -455,7 +494,7 @@ export const useCleanStore = create<CleanState>((set, get) => ({
             (f) => f.path !== path && !f.is_selected_for_removal
           );
           if (remainingKept.length === 0) {
-            // Cannot mark all files in group for deletion
+            // Cannot mark all files in group for deletion - at least one must be preserved
             return group;
           }
         }
@@ -478,10 +517,20 @@ export const useCleanStore = create<CleanState>((set, get) => ({
     });
   },
 
-  autoSelectDuplicates: (strategy: "keep_oldest" | "keep_newest") => {
+  autoSelectDuplicates: (strategy: "keep_oldest" | "keep_newest" | "deselect_all") => {
     set((state) => {
       if (!state.duplicatesResult) return state;
       const updatedGroups = state.duplicatesResult.groups.map((group) => {
+        if (strategy === "deselect_all") {
+          return {
+            ...group,
+            files: group.files.map((file) => ({
+              ...file,
+              is_selected_for_removal: false,
+            })),
+          };
+        }
+
         const sorted = [...group.files].sort((a, b) => {
           const timeA = a.modified_at ? new Date(a.modified_at).getTime() : 0;
           const timeB = b.modified_at ? new Date(b.modified_at).getTime() : 0;
@@ -505,6 +554,104 @@ export const useCleanStore = create<CleanState>((set, get) => ({
         },
       };
     });
+  },
+
+  openDuplicateConfirmModal: () => set({ showDuplicateConfirmModal: true }),
+  closeDuplicateConfirmModal: () => set({ showDuplicateConfirmModal: false }),
+
+  executeDuplicateCleanup: async () => {
+    const { duplicatesResult, dryRunMode } = get();
+    if (!duplicatesResult) return null;
+
+    const selections: DuplicateGroupCleanSelection[] = [];
+    for (const group of duplicatesResult.groups) {
+      const pathsToDelete = group.files
+        .filter((f) => f.is_selected_for_removal)
+        .map((f) => f.path);
+
+      if (pathsToDelete.length === 0) continue;
+
+      const original = group.files.find((f) => !f.is_selected_for_removal);
+      if (!original) {
+        console.error(`Group ${group.hash} has no preserved original file!`);
+        continue;
+      }
+
+      selections.push({
+        group_hash: group.hash,
+        original_path: original.path,
+        paths_to_delete: pathsToDelete,
+      });
+    }
+
+    if (selections.length === 0) return null;
+
+    set({ isDuplicateCleaning: true });
+
+    try {
+      const result = await api.cleanDuplicates({
+        groups: selections,
+        dry_run: dryRunMode,
+        confirmed: true,
+      });
+
+      set({
+        duplicateCleanResult: result,
+        isDuplicateCleaning: false,
+        showDuplicateConfirmModal: false,
+      });
+
+      if (!dryRunMode && result.items_deleted > 0) {
+        const failedPaths = new Set(result.errors.map((e) => e.path));
+        const deletedPaths = new Set(
+          selections
+            .flatMap((s) => s.paths_to_delete)
+            .filter((p) => !failedPaths.has(p))
+        );
+
+        const nextGroups = duplicatesResult.groups
+          .map((group) => {
+            const remainingFiles = group.files.filter((f) => !deletedPaths.has(f.path));
+            return {
+              ...group,
+              files: remainingFiles,
+            };
+          })
+          .filter((group) => group.files.length > 1);
+
+        const totalWasted = nextGroups.reduce((acc, g) => acc + g.wasted_bytes, 0);
+        const totalReclaimable = nextGroups.reduce((acc, g) => acc + g.reclaimable_bytes, 0);
+        const totalFiles = nextGroups.reduce((acc, g) => acc + g.files.length, 0);
+
+        set({
+          duplicatesResult: {
+            ...duplicatesResult,
+            groups: nextGroups,
+            total_duplicate_groups: nextGroups.length,
+            total_duplicate_files: totalFiles,
+            total_wasted_bytes: totalWasted,
+            total_reclaimable_bytes: totalReclaimable,
+          },
+        });
+
+        get().fetchSystemSummary();
+        get().fetchHistory();
+      }
+
+      return result;
+    } catch (err) {
+      console.error("Duplicate cleanup error:", err);
+      set({ isDuplicateCleaning: false });
+      return null;
+    }
+  },
+
+  cancelDuplicateClean: async () => {
+    try {
+      await api.cancelDuplicateClean();
+    } finally {
+      set({ isDuplicateCleaning: false });
+    }
   },
 
   scanApplications: async () => {

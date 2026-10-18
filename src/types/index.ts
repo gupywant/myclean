@@ -205,23 +205,58 @@ export interface StorageAnalysisResult {
 export interface DuplicateFile {
   path: string;
   name: string;
+  file_size: number;
+  allocated_bytes: number;
   modified_at: string | null;
   is_selected_for_removal: boolean;
+  inode: number;
+  device: number;
+  nlink: number;
+  is_hardlink_copy: boolean;
+  is_suggested_original: boolean;
 }
 
 export interface DuplicateGroup {
   hash: string;
   file_size: number;
+  allocated_bytes: number;
   wasted_bytes: number;
+  reclaimable_bytes: number;
+  has_hardlinks: boolean;
   files: DuplicateFile[];
+}
+
+export interface DuplicateScanProgress {
+  phase: string;
+  files_scanned: number;
+  candidate_files: number;
+  candidate_groups: number;
+  bytes_hashed: number;
+  current_file: string;
+  percent_complete: number;
 }
 
 export interface DuplicateScanResult {
   duration_ms: number;
   total_duplicate_groups: number;
+  total_duplicate_files: number;
   total_wasted_bytes: number;
+  total_reclaimable_bytes: number;
   groups: DuplicateGroup[];
+  skipped_paths?: SkippedPath[];
   was_cancelled: boolean;
+}
+
+export interface DuplicateGroupCleanSelection {
+  group_hash: string;
+  original_path: string;
+  paths_to_delete: string[];
+}
+
+export interface CleanDuplicatesRequest {
+  groups: DuplicateGroupCleanSelection[];
+  dry_run: boolean;
+  confirmed: boolean;
 }
 
 export interface AppArtifact {
