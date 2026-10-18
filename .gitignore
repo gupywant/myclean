@@ -1,0 +1,25 @@
+# Node & Web
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Rust & Tauri
+target/
+src-tauri/target/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+
+# IDE & Logs
+*.log
+.vscode/
+.idea/

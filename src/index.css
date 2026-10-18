@@ -1,0 +1,107 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --color-canvas: #07080D;
+    --color-surface-subtle: #0B0D15;
+    --color-surface-card: #101422;
+    --color-surface-elevated: #161C30;
+    --color-surface-hover: #1C233D;
+    --color-border-dim: rgba(255, 255, 255, 0.05);
+    --color-border-subtle: rgba(255, 255, 255, 0.09);
+    --color-border-glow: rgba(99, 102, 241, 0.35);
+    --color-accent-indigo: #6366F1;
+    --color-accent-violet: #8B5CF6;
+    --color-accent-cyan: #06B6D4;
+    --color-accent-emerald: #10B981;
+    --color-accent-amber: #F59E0B;
+    --color-accent-rose: #F43F5E;
+  }
+
+  body {
+    background-color: var(--color-canvas);
+    color: #F1F5F9;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", system-ui, sans-serif;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Custom subtle dark scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 9999px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.22);
+  }
+}
+
+/* Glass & Glow utilities */
+.frosted-glass {
+  background: rgba(13, 16, 26, 0.72);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.frosted-glass-card {
+  background: linear-gradient(135deg, rgba(19, 23, 38, 0.6) 0%, rgba(13, 15, 24, 0.75) 100%);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+}
+
+.glow-indigo {
+  box-shadow: 0 0 25px -3px rgba(99, 102, 241, 0.3);
+}
+
+.glow-cyan {
+  box-shadow: 0 0 25px -3px rgba(6, 182, 212, 0.3);
+}
+
+.glow-violet {
+  box-shadow: 0 0 25px -3px rgba(139, 92, 246, 0.3);
+}
+
+.mac-titlebar-drag {
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+.mac-titlebar-no-drag {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+/* Radar pulse keyframes */
+@keyframes pulse-ring {
+  0% {
+    transform: scale(0.9);
+    opacity: 0.8;
+  }
+  50% {
+    transform: scale(1.15);
+    opacity: 0.3;
+  }
+  100% {
+    transform: scale(0.9);
+    opacity: 0.8;
+  }
+}
+
+.animate-pulse-ring {
+  animation: pulse-ring 3.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
