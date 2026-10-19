@@ -75,7 +75,7 @@ export const Sidebar: React.FC = () => {
   const isSpinning = isRefreshing || isSystemLoading;
 
   return (
-    <aside className="w-64 h-full bg-[#080A12]/85 backdrop-blur-2xl border-r border-white/[0.06] flex flex-col justify-between p-3 select-none">
+    <aside className="w-64 h-full app-sidebar bg-[#080A12]/85 backdrop-blur-2xl border-r border-white/[0.06] flex flex-col justify-between p-3 select-none transition-colors duration-200">
       {/* Brand & Workspace */}
       <div className="space-y-4">
         <div className="flex items-center space-x-2.5 px-3 py-2">

@@ -4,6 +4,10 @@ import App from "./App";
 import "./index.css";
 import { useCleanStore } from "./store/useCleanStore";
 import * as api from "./lib/api";
+import { initializeThemeFromCache } from "./lib/theme";
+
+// Initialize theme from cache immediately to prevent flash
+initializeThemeFromCache();
 
 // Top-level automation and remote test hooks
 (window as any).useCleanStore = useCleanStore;

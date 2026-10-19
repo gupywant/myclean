@@ -490,6 +490,22 @@
     - Multi-select checkboxes with sticky floating batch action bar and native macOS Trash confirmation dialog.
     - Per-file actions: Reveal in Finder, Exclude from Future Scans (Whitelist), and Move to Trash.
     - All deletions routed through silent Cocoa trashing (`NSFileManager.trashItemAtURL`).
+- [x] **General Appearance Dynamic Theme & Accent Studio Integration:**
+  - Diagnosed why General Appearance changes had no effect:
+    1. `App.tsx` never called `fetchPreferences()` on launch, leaving preferences unhydrated.
+    2. Preferences were saved in SQLite but never applied to `document.documentElement` or any CSS variables/classes.
+    3. No styling existed for `light` theme mode, dynamic accent color overrides, or animation intensity switches.
+    4. No system theme listener existed to track dynamic macOS dark/light mode toggles.
+  - Built `src/lib/theme.ts`:
+    - Synchronous initialization before React render (`initializeThemeFromCache`) to eliminate cold boot flicker.
+    - Reactive application of `data-theme`, `data-accent`, and `data-animations` on `document.documentElement`.
+    - Live `window.matchMedia("(prefers-color-scheme: dark)")` listener when "System" theme is selected, instantly synchronizing with macOS Appearance changes.
+    - LocalStorage caching for instant hydration across window reloads.
+  - Added comprehensive CSS theme engine in `src/index.css`:
+    - Full Light Theme styling: Crisp `#F4F6FB` canvas, `#FFFFFF` card surfaces, `#F1F4F9` sub-surfaces, `#0F172A` high-contrast typography, and light frosted glass.
+    - Dynamic Accent Colors: Electric Violet (`#8B5CF6`), Cyan Pulse (`#06B6D4`), and Hyper Indigo (`#6366F1`) seamlessly tint primary buttons, active sidebar items, badges, and glow borders.
+    - Animation Intensity: Reduced motion stops heavy radar sweeps and ping rings; "Off" eliminates all animations and transitions.
+  - Integrated optimistic updates in `useCleanStore.ts` for instantaneous (0ms) visual responsiveness upon clicking theme, accent, or animation controls.
 
 ### Phase 12: Homebrew Tap & Update Checker (Planned / Next)
 - [ ] Create Homebrew Tap (`gupywant/homebrew-tap`) and Cask formula (`Casks/myclean.rb`).

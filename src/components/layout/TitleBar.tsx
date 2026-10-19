@@ -14,7 +14,7 @@ export const TitleBar: React.FC = () => {
   const primaryDisk = systemSummary?.primary_disk;
 
   return (
-    <header className="h-11 w-full bg-[#080A12]/90 backdrop-blur-md border-b border-white/[0.06] flex items-center justify-between px-4 select-none mac-titlebar-drag z-50">
+    <header className="h-11 w-full app-titlebar bg-[#080A12]/90 backdrop-blur-md border-b border-white/[0.06] flex items-center justify-between px-4 select-none mac-titlebar-drag z-50 transition-colors duration-200">
       {/* Left traffic lights reserve spacing (standard macOS traffic lights sit around 72px) */}
       <div className="flex items-center space-x-3 pl-18 mac-titlebar-no-drag">
         <div className="flex items-center space-x-2">

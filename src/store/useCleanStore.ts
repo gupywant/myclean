@@ -33,6 +33,7 @@ import type {
   DatabaseHealthReport,
   LargeFilesScanResult,
 } from "../types";
+import { applyThemePreferences } from "../lib/theme";
 
 export const INITIAL_CATEGORY_STATES: Record<string, LiveCategoryState> = {
   system_cache: {
@@ -1529,6 +1530,7 @@ export const useCleanStore = create<CleanState>((set, get) => ({
     set({ isPreferencesLoading: true });
     try {
       const prefs = await api.getPreferences();
+      applyThemePreferences(prefs);
       set({ preferences: prefs, dryRunMode: prefs.dry_run_default, isPreferencesLoading: false });
     } catch (err) {
       console.error("Failed to load preferences:", err);
@@ -1537,13 +1539,40 @@ export const useCleanStore = create<CleanState>((set, get) => ({
   },
 
   updatePreferences: async (partial) => {
-    const current = get().preferences;
-    if (!current) return;
+    const current = get().preferences || {
+      theme: "dark",
+      accent_color: "violet",
+      animation_intensity: "full",
+      dry_run_default: false,
+      move_to_trash_only: true,
+      confirm_before_cleanup: true,
+      large_file_threshold_mb: 100,
+      low_disk_warning_threshold_gb: 15,
+      history_retention: "90_days",
+      notify_scan_complete: true,
+      notify_clean_complete: true,
+      notify_clean_failure: true,
+      notify_low_disk_space: true,
+      scan_reminder_interval: "weekly",
+      cpu_thread_limit: 0,
+      default_categories: [],
+      developer_workspaces: [],
+    };
+
+    const optimistic: AppPreferences = { ...current, ...partial, move_to_trash_only: true };
+    // Apply theme and accent immediately for 0ms visual responsiveness
+    applyThemePreferences(optimistic);
+    set({ preferences: optimistic });
+
     try {
-      const updated = await api.updatePreferences({ ...current, ...partial, move_to_trash_only: true });
+      const updated = await api.updatePreferences(optimistic);
       set({ preferences: updated });
     } catch (err) {
       console.error("Failed to update preferences:", err);
+      if (current) {
+        applyThemePreferences(current);
+        set({ preferences: current });
+      }
     }
   },
 

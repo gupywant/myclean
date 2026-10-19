@@ -15,6 +15,7 @@ import {
   Cpu,
   Info,
 } from "@phosphor-icons/react";
+import { resolveEffectiveTheme } from "../../lib/theme";
 
 type SettingsSection = "general" | "safety" | "exclusions" | "notifications" | "database";
 
@@ -158,18 +159,22 @@ export const SettingsView: React.FC = () => {
                 <button
                   key={t}
                   onClick={() => updatePreferences({ theme: t })}
-                  className={`p-3.5 rounded-lg border text-left transition-all ${
+                  className={`p-3.5 rounded-lg border text-left transition-all cursor-pointer ${
                     preferences.theme === t
-                      ? "bg-violet-600/10 border-violet-500/40 text-white"
+                      ? "bg-violet-600/15 border-violet-500/50 text-white shadow-md shadow-violet-950/20"
                       : "bg-white/[0.02] border-white/[0.05] text-slate-400 hover:bg-white/[0.04]"
                   }`}
                 >
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-semibold capitalize text-white">{t} Theme</span>
-                    {preferences.theme === t && <CheckCircle size={14} className="text-violet-400" weight="fill" />}
+                    {preferences.theme === t && <CheckCircle size={15} className="text-violet-400" weight="fill" />}
                   </div>
                   <p className="text-[10px] text-slate-400 mt-1">
-                    {t === "dark" ? "Deep navy & void black palette (Recommended)" : t === "system" ? "Automatically match macOS system setting" : "High-contrast clean surface mode"}
+                    {t === "dark"
+                      ? "Deep navy & void black palette (Recommended)"
+                      : t === "system"
+                      ? `Automatically matches macOS (${resolveEffectiveTheme("system") === "dark" ? "macOS Dark Mode active" : "macOS Light Mode active"})`
+                      : "High-contrast clean macOS surface mode"}
                   </p>
                 </button>
               ))}
@@ -187,14 +192,17 @@ export const SettingsView: React.FC = () => {
                   <button
                     key={acc.id}
                     onClick={() => updatePreferences({ accent_color: acc.id as any })}
-                    className={`flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs border transition-all ${
+                    className={`flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs border transition-all cursor-pointer ${
                       preferences.accent_color === acc.id
-                        ? "border-white/30 bg-white/[0.06] text-white"
+                        ? "border-violet-500/50 bg-violet-600/15 text-white shadow-sm"
                         : "border-white/[0.05] text-slate-400 hover:bg-white/[0.02]"
                     }`}
                   >
                     <span className={`w-3 h-3 rounded-full ${acc.color}`} />
                     <span>{acc.label}</span>
+                    {preferences.accent_color === acc.id && (
+                      <CheckCircle size={13} className="text-violet-400 ml-1" weight="fill" />
+                    )}
                   </button>
                 ))}
               </div>
@@ -213,9 +221,9 @@ export const SettingsView: React.FC = () => {
                   <button
                     key={level}
                     onClick={() => updatePreferences({ animation_intensity: level })}
-                    className={`px-3 py-1 rounded-md text-[11px] font-medium border capitalize ${
+                    className={`px-3 py-1 rounded-md text-[11px] font-medium border capitalize cursor-pointer transition-all ${
                       preferences.animation_intensity === level
-                        ? "bg-violet-600/20 border-violet-500/40 text-violet-300"
+                        ? "bg-violet-600/20 border-violet-500/40 text-violet-300 shadow-sm"
                         : "border-white/[0.06] text-slate-400 hover:text-white"
                     }`}
                   >

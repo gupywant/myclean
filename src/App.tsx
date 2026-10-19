@@ -52,9 +52,10 @@ const ViewLoadingFallback: React.FC = () => (
 );
 
 export const App: React.FC = () => {
-  const { activeTab, fetchSystemSummary, fetchHistory } = useFluxStore();
+  const { activeTab, fetchSystemSummary, fetchHistory, fetchPreferences } = useFluxStore();
 
   useEffect(() => {
+    fetchPreferences();
     fetchSystemSummary();
     fetchHistory();
 
@@ -91,7 +92,7 @@ export const App: React.FC = () => {
 
 
   return (
-    <div className="flex flex-col h-screen w-screen bg-[#07080D] text-slate-100 overflow-hidden">
+    <div className="flex flex-col h-screen w-screen bg-[#07080D] app-canvas text-slate-100 app-text overflow-hidden transition-colors duration-200">
       {/* Native-styled macOS TitleBar */}
       <TitleBar />
 
@@ -101,7 +102,7 @@ export const App: React.FC = () => {
         <Sidebar />
 
         {/* View Router */}
-        <main className="flex-1 flex flex-col bg-gradient-to-br from-[#07080D] via-[#090C16] to-[#0B0F1C] overflow-hidden">
+        <main className="flex-1 flex flex-col bg-gradient-to-br from-[#07080D] via-[#090C16] to-[#0B0F1C] app-main-gradient overflow-hidden transition-colors duration-200">
           <Suspense fallback={<ViewLoadingFallback />}>
             {activeTab === "dashboard" && <DashboardView />}
             {activeTab === "deep-clean" && <DeepCleanView />}
