@@ -433,12 +433,19 @@
     6. macOS Trash & Large Candidate Files
     7. Docker Engine Resources
   - Verified live UI state in the running application: smoothly progressed from 0% to 100%, culminating in the final results view with **7.9 GB Estimated Recoverable Space (59 candidate items)**, green checkmarks across all 7 stage cards, and the interactive **"Review Cleanup (7.9 GB)"** button.
-- [x] **Native macOS Notification Icon Integration (`notifications.rs`):**
-  - Diagnosed root cause of generic white placeholder icon: `osascript` executed in a detached `/usr/bin/osascript` subshell where macOS Notification Center fell back to the unbundled command-line tool icon.
-  - Replaced subshell execution with native Cocoa `NSUserNotification` integration via `mac-notification-sys`.
-  - Configured explicit application identity (`set_application("com.myclean.app")`) and embedded `_identityImage` resolution (`notif.app_icon(...)`) linking directly to `/Applications/myclean.app/Contents/Resources/icon.icns`.
-  - Added unit test `test_resolve_app_icon` verifying bundle icon resolution (102/102 cargo tests passing).
-  - Built fresh release and installed to `/Applications/myclean.app`.
+- [x] **Dry-Run Simulation Feedback & Cleanup Results Modal:**
+  - Resolved issue where Dry-Run simulation closed the confirmation modal prematurely with no user feedback.
+  - Implemented multi-state modal flow in `ConfirmCleanModal.tsx`:
+    - In-progress simulation spinner with clear safety description and cancellation button.
+    - Dry-Run Simulation Verified screen showing reclaimable space (cyan), verified items count, 100% safety indicator, and zero-file-altered guarantee.
+    - Transition button to proceed directly from dry-run preview into real macOS Trash deletion.
+    - Cleanup completion screen showing storage freed (emerald), items trashed, and celebration confetti.
+- [x] **Silent Cocoa Trash Integration (`SafetyGuard::trash_item`):**
+  - Diagnosed audible macOS Finder paper-crunch sound effect during cleanup: `trash` crate defaulted to `DeleteMethod::Finder` which executes `osascript -e 'tell application "Finder" to delete...'`, causing Finder to play the system trash sound on every file and introducing subshell overhead.
+  - Implemented `SafetyGuard::trash_item` and `SafetyGuard::trash_all` configuring `DeleteMethod::NsFileManager` (`NSFileManager.trashItemAtURL`).
+  - Switched all cleanup modules (`cleaner.rs`, `apps.rs`, `developer.rs`, `duplicates.rs`) to silent Cocoa trashing.
+  - Deletions are now completely silent, significantly faster, and remain 100% recoverable in the macOS Trash.
+  - Added unit test `test_silent_trash_execution` (103/103 cargo tests passing).
 
 ### Phase 12: Homebrew Tap & Update Checker (Planned / Next)
 - [ ] Create Homebrew Tap (`gupywant/homebrew-tap`) and Cask formula (`Casks/myclean.rb`).
