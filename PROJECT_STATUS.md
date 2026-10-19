@@ -327,9 +327,26 @@
 - [x] **Automated CI/CD Release Pipeline (`.github/workflows/release.yml`):**
   - Configured GitHub Actions workflow on `v*` tags with least-privilege `contents: write` permissions.
   - Automates dual-target Rust toolchain setup, linting (`clippy`), unit tests (`cargo test`), TypeScript checks (`tsc`), DMG packaging, and release publishing via `softprops/action-gh-release@v2`.
-- [x] **Comprehensive Public Distribution Guides:**
-  - `INSTALL_MACOS.md`: Step-by-step installation, Gatekeeper "Open Anyway" instructions, Full Disk Access (FDA) guidance, and complete uninstallation instructions without disabling system security.
-  - `RELEASE.md`: Technical packaging architecture, build matrix, and privacy declarations.
-  - `CHANGELOG.md`: Complete history of features, safety invariants, and performance benchmarks across all 10 phases.
-  - `WEBSITE_DISTRIBUTION.md`: Download CDN URLs, copy guidelines, React/Tailwind download card component, and SEO metadata.
+
+### Phase 11: GitHub Branding, SEO, README & Screenshots
+- [x] **GitHub Repository Optimization & SEO:**
+  - Configured repository description: *"A modern, privacy-first macOS cleaner built with Rust and Tauri. Clean caches, analyze storage, find duplicates, uninstall apps, and manage Docker clutter safely."*
+  - Configured 12 GitHub topics: `macos`, `macos-app`, `macos-cleaner`, `disk-cleaner`, `rust`, `tauri`, `desktop-app`, `storage-analyzer`, `duplicate-finder`, `docker`, `developer-tools`, `open-source`.
+- [x] **Branding Asset Organization (`assets/branding/`):**
+  - Encapsulated approved Gradient M Broom Logo in `assets/branding/myclean-logo.svg` and `assets/branding/myclean-logo.png` without altering design.
+  - Native Tauri application icons maintained in `src-tauri/icons/`.
+- [x] **Authentic Application Screenshot (`assets/screenshots/dashboard.png`):**
+  - Captured actual 1200×800 screenshot of the running myclean dashboard showing the Futuristic Premium void black surface, active SIP Shield status, disk breakdown, and centered radar disc with approved logo.
+  - Sanitized telemetry ensuring zero personal user paths or private data exposure.
+- [x] **GitHub Social Preview (`assets/branding/github-social-preview.png`):**
+  - Generated 1280×640 social preview card featuring ambient violet/cyan backlighting, typographic badges, and real window frame composition.
+- [x] **Developer Landing Page (`README.md`):**
+  - Centered hero layout with approved logo, version badges, direct Universal DMG download CTA, and real dashboard preview.
+  - Comprehensive technical sections: architecture, safety invariants, tech stack, Gatekeeper launch methods, build from source instructions, known limitations, and roadmap.
+- [x] **Permissive MIT License (`LICENSE`):**
+  - Added official MIT open-source license covering myclean contributors.
+
+### Phase 12: Homebrew Tap & Update Checker (Planned / Next)
+- [ ] Create Homebrew Tap (`gupywant/homebrew-tap`) and Cask formula (`Casks/myclean.rb`).
+- [ ] Implement opt-in GitHub Release update notifier with semantic version comparisons.
 
