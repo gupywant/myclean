@@ -1,5 +1,4 @@
 use crate::safety::SafetyGuard;
-use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs;
@@ -19,6 +18,17 @@ pub enum RiskClassification {
     Protected,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CategoryScanStatus {
+    Pending,
+    Scanning,
+    Completed,
+    Skipped,
+    Error,
+    Partial,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ScanCategory {
@@ -31,6 +41,7 @@ pub enum ScanCategory {
     UserTrash,
     MailDownloads,
     LargeFiles,
+    Docker,
 }
 
 impl ScanCategory {
@@ -45,6 +56,7 @@ impl ScanCategory {
             ScanCategory::UserTrash => "macOS Trash Bin",
             ScanCategory::MailDownloads => "Mail Attachments & Caches",
             ScanCategory::LargeFiles => "Large & Old Files (>100MB)",
+            ScanCategory::Docker => "Docker Clutter & Caches",
         }
     }
 
@@ -59,12 +71,13 @@ impl ScanCategory {
             ScanCategory::UserTrash => "Files currently sitting in your macOS Trash bin taking up storage.",
             ScanCategory::MailDownloads => "Temporary cached email attachments that were viewed or previewed.",
             ScanCategory::LargeFiles => "High-capacity files and archives older than 30 days.",
+            ScanCategory::Docker => "Dangling Docker images and reusable build cache layers that can be pruned safely.",
         }
     }
 
     pub fn default_classification(&self) -> RiskClassification {
         match self {
-            ScanCategory::LargeFiles => RiskClassification::ReviewRequired,
+            ScanCategory::LargeFiles | ScanCategory::Docker => RiskClassification::ReviewRequired,
             _ => RiskClassification::SafeToClean,
         }
     }
@@ -72,6 +85,10 @@ impl ScanCategory {
     pub fn is_safe_by_default(&self) -> bool {
         self.default_classification() == RiskClassification::SafeToClean
     }
+}
+
+fn default_docker_scope() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -85,6 +102,8 @@ pub struct ScanScopeConfig {
     pub include_trash: bool,
     pub include_mail_downloads: bool,
     pub include_large_files: bool,
+    #[serde(default = "default_docker_scope")]
+    pub include_docker: bool,
     pub large_files_min_mb: Option<u64>,
     pub custom_paths: Vec<String>,
     pub user_exclusions: Vec<String>,
@@ -102,6 +121,7 @@ impl Default for ScanScopeConfig {
             include_trash: true,
             include_mail_downloads: true,
             include_large_files: true,
+            include_docker: true,
             large_files_min_mb: Some(100),
             custom_paths: Vec::new(),
             user_exclusions: Vec::new(),
@@ -155,14 +175,37 @@ pub struct SkippedPath {
     pub reason: String,
 }
 
+#[derive(Default)]
+pub struct ScanMetrics {
+    pub files_inspected: std::sync::atomic::AtomicUsize,
+    pub directories_inspected: std::sync::atomic::AtomicUsize,
+    pub bytes_analyzed: std::sync::atomic::AtomicU64,
+    pub skipped_count: std::sync::atomic::AtomicUsize,
+    pub permission_denied_count: std::sync::atomic::AtomicUsize,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScanProgress {
-    pub phase: String,
+    pub session_id: String,
+    pub category_id: String,
     pub current_category: String,
     pub current_path: String,
+    pub phase: String,
+    pub files_inspected: usize,
+    pub directories_inspected: usize,
+    pub bytes_analyzed: u64,
+    pub items_discovered: usize,
     pub items_found: usize,
     pub bytes_found: u64,
-    pub percent_complete: f32, // -1.0 indicates indeterminate progress
+    pub category_status: CategoryScanStatus,
+    pub category_progress: f32, // 0.0..=100.0 or -1.0
+    pub overall_progress: f32,  // 0.0..=100.0
+    pub percent_complete: f32,  // backward-compat alias
+    pub skipped_count: usize,
+    pub permission_denied_count: usize,
+    pub elapsed_ms: u64,
+    pub safe_items_count: usize,
+    pub review_items_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -175,6 +218,74 @@ pub struct ScanResult {
     #[serde(default)]
     pub skipped_paths: Vec<SkippedPath>,
     pub was_cancelled: bool,
+}
+
+struct ProgressEmitter<F> {
+    session_id: String,
+    start_time: Instant,
+    last_emit: Instant,
+    last_overall_progress: f32,
+    callback: F,
+    metrics: Arc<ScanMetrics>,
+    discovered_items: usize,
+    discovered_bytes: u64,
+    safe_items_count: usize,
+    review_items_count: usize,
+}
+
+impl<F: Fn(ScanProgress) + Send + Sync> ProgressEmitter<F> {
+    #[allow(clippy::too_many_arguments)]
+    fn emit(
+        &mut self,
+        category_id: &str,
+        category_name: &str,
+        path: &str,
+        phase: &str,
+        status: CategoryScanStatus,
+        category_progress: f32,
+        overall_progress_raw: f32,
+        force: bool,
+    ) {
+        let now = Instant::now();
+        if !force && now.duration_since(self.last_emit).as_millis() < 35 {
+            return;
+        }
+
+        let overall = if status == CategoryScanStatus::Completed && category_id == "docker" && overall_progress_raw >= 99.9 {
+            100.0
+        } else {
+            overall_progress_raw.max(self.last_overall_progress).min(99.9)
+        };
+        self.last_overall_progress = overall;
+        self.last_emit = now;
+
+        let elapsed = self.start_time.elapsed().as_millis() as u64;
+
+        let prog = ScanProgress {
+            session_id: self.session_id.clone(),
+            category_id: category_id.to_string(),
+            current_category: category_name.to_string(),
+            current_path: path.to_string(),
+            phase: phase.to_string(),
+            files_inspected: self.metrics.files_inspected.load(Ordering::Relaxed),
+            directories_inspected: self.metrics.directories_inspected.load(Ordering::Relaxed),
+            bytes_analyzed: self.metrics.bytes_analyzed.load(Ordering::Relaxed),
+            items_discovered: self.discovered_items,
+            items_found: self.discovered_items,
+            bytes_found: self.discovered_bytes,
+            category_status: status,
+            category_progress,
+            overall_progress: overall,
+            percent_complete: overall,
+            skipped_count: self.metrics.skipped_count.load(Ordering::Relaxed),
+            permission_denied_count: self.metrics.permission_denied_count.load(Ordering::Relaxed),
+            elapsed_ms: elapsed,
+            safe_items_count: self.safe_items_count,
+            review_items_count: self.review_items_count,
+        };
+
+        (self.callback)(prog);
+    }
 }
 
 pub struct Scanner;
@@ -296,6 +407,14 @@ impl Scanner {
                 Some("Explicit user review required before trashing large files".into()),
                 None,
             ),
+            ScanCategory::Docker => (
+                "RULE_DOCKER_CLUTTER".into(),
+                "Untagged dangling Docker images and reusable build cache layers that can be pruned safely.".into(),
+                RiskClassification::ReviewRequired,
+                true,
+                None,
+                Some("Docker".into()),
+            ),
         }
     }
 
@@ -307,13 +426,14 @@ impl Scanner {
         Self::measure_path_advanced(path, &mut visited, &mut skipped, &[], &cancel)
     }
 
-    /// Measures path returning both allocated bytes, logical bytes, and file count.
-    pub fn measure_path_detailed<P: AsRef<Path>>(
+    /// Measures path with live ScanMetrics instrumentation
+    pub fn measure_path_with_metrics<P: AsRef<Path>>(
         path: P,
         visited_inodes: &mut HashSet<(u64, u64)>,
         skipped_paths: &mut Vec<SkippedPath>,
         user_exclusions: &[String],
         cancel_token: &AtomicBool,
+        metrics: &ScanMetrics,
     ) -> (u64, u64, usize) {
         let p = path.as_ref();
         if !p.exists() {
@@ -324,12 +444,14 @@ impl Scanner {
         let path_str = p.to_string_lossy();
         for excl in user_exclusions {
             if path_str.starts_with(excl) {
+                metrics.skipped_count.fetch_add(1, Ordering::Relaxed);
                 return (0, 0, 0);
             }
         }
 
         // Check mandatory safety exclusion
         if SafetyGuard::is_mandatory_exclusion(p) {
+            metrics.skipped_count.fetch_add(1, Ordering::Relaxed);
             return (0, 0, 0);
         }
 
@@ -337,6 +459,10 @@ impl Scanner {
             let meta = match p.symlink_metadata() {
                 Ok(m) => m,
                 Err(e) => {
+                    metrics.skipped_count.fetch_add(1, Ordering::Relaxed);
+                    if e.kind() == std::io::ErrorKind::PermissionDenied {
+                        metrics.permission_denied_count.fetch_add(1, Ordering::Relaxed);
+                    }
                     skipped_paths.push(SkippedPath {
                         path: path_str.to_string(),
                         reason: e.to_string(),
@@ -345,8 +471,10 @@ impl Scanner {
                 }
             };
 
+            metrics.files_inspected.fetch_add(1, Ordering::Relaxed);
             let alloc = meta.blocks() * 512;
             let logical = meta.len();
+            metrics.bytes_analyzed.fetch_add(logical, Ordering::Relaxed);
 
             // Hard-link deduplication for individual files
             if meta.nlink() > 1 {
@@ -362,6 +490,10 @@ impl Scanner {
         let root_meta = match p.symlink_metadata() {
             Ok(m) => m,
             Err(e) => {
+                metrics.skipped_count.fetch_add(1, Ordering::Relaxed);
+                if e.kind() == std::io::ErrorKind::PermissionDenied {
+                    metrics.permission_denied_count.fetch_add(1, Ordering::Relaxed);
+                }
                 skipped_paths.push(SkippedPath {
                     path: path_str.to_string(),
                     reason: e.to_string(),
@@ -370,6 +502,7 @@ impl Scanner {
             }
         };
         let root_dev = root_meta.dev();
+        metrics.directories_inspected.fetch_add(1, Ordering::Relaxed);
 
         let mut total_allocated = 0u64;
         let mut total_logical = 0u64;
@@ -380,9 +513,7 @@ impl Scanner {
             .follow_links(false)
             .into_iter()
             .filter_entry(|entry| {
-                let ep = entry.path();
-                // Prune .git and mandatory exclusions from traversing deeper
-                !SafetyGuard::is_mandatory_exclusion(ep)
+                !SafetyGuard::is_mandatory_exclusion(entry.path())
             });
 
         for entry_res in walker {
@@ -393,10 +524,15 @@ impl Scanner {
             let entry = match entry_res {
                 Ok(e) => e,
                 Err(err) => {
+                    metrics.skipped_count.fetch_add(1, Ordering::Relaxed);
+                    let err_str = err.to_string();
+                    if err_str.contains("Permission denied") {
+                        metrics.permission_denied_count.fetch_add(1, Ordering::Relaxed);
+                    }
                     let err_path = err.path().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
                     skipped_paths.push(SkippedPath {
                         path: err_path,
-                        reason: err.to_string(),
+                        reason: err_str,
                     });
                     continue;
                 }
@@ -410,9 +546,14 @@ impl Scanner {
             let meta = match ep.symlink_metadata() {
                 Ok(m) => m,
                 Err(err) => {
+                    metrics.skipped_count.fetch_add(1, Ordering::Relaxed);
+                    let err_str = err.to_string();
+                    if err_str.contains("Permission denied") {
+                        metrics.permission_denied_count.fetch_add(1, Ordering::Relaxed);
+                    }
                     skipped_paths.push(SkippedPath {
                         path: ep.to_string_lossy().to_string(),
-                        reason: err.to_string(),
+                        reason: err_str,
                     });
                     continue;
                 }
@@ -423,8 +564,15 @@ impl Scanner {
                 continue;
             }
 
+            if meta.file_type().is_dir() {
+                metrics.directories_inspected.fetch_add(1, Ordering::Relaxed);
+                continue;
+            }
+
             // If symlink, record size of the link itself, never follow external path
             if meta.file_type().is_symlink() {
+                metrics.files_inspected.fetch_add(1, Ordering::Relaxed);
+                metrics.bytes_analyzed.fetch_add(meta.len(), Ordering::Relaxed);
                 total_allocated += meta.blocks() * 512;
                 total_logical += meta.len();
                 file_count += 1;
@@ -432,6 +580,8 @@ impl Scanner {
             }
 
             if meta.is_file() {
+                metrics.files_inspected.fetch_add(1, Ordering::Relaxed);
+                metrics.bytes_analyzed.fetch_add(meta.len(), Ordering::Relaxed);
                 let dev = meta.dev();
                 let ino = meta.ino();
                 let nlink = meta.nlink();
@@ -451,6 +601,25 @@ impl Scanner {
         }
 
         (total_allocated, total_logical, file_count)
+    }
+
+    /// Measures path returning both allocated bytes, logical bytes, and file count.
+    pub fn measure_path_detailed<P: AsRef<Path>>(
+        path: P,
+        visited_inodes: &mut HashSet<(u64, u64)>,
+        skipped_paths: &mut Vec<SkippedPath>,
+        user_exclusions: &[String],
+        cancel_token: &AtomicBool,
+    ) -> (u64, u64, usize) {
+        let metrics = ScanMetrics::default();
+        Self::measure_path_with_metrics(
+            path,
+            visited_inodes,
+            skipped_paths,
+            user_exclusions,
+            cancel_token,
+            &metrics,
+        )
     }
 
     /// Advanced path measurement supporting hard-link deduplication, symlink safety,
@@ -490,302 +659,767 @@ impl Scanner {
         F: Fn(ScanProgress) + Send + Sync,
     {
         let start_time = Instant::now();
+        let session_id = format!("scan-{}", chrono::Utc::now().timestamp_millis());
         let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
-        let mut targets: Vec<(ScanCategory, PathBuf, &'static str)> = Vec::new();
 
-        // 1. System & User Caches
-        if config.include_system_caches || config.include_browser_caches || config.include_messaging_caches || config.include_developer_caches {
+        let metrics = Arc::new(ScanMetrics::default());
+        let items_collector = Arc::new(Mutex::new(Vec::new()));
+        let skipped_collector = Arc::new(Mutex::new(Vec::new()));
+        let was_cancelled = Arc::new(AtomicBool::new(false));
+        let user_exclusions = Arc::new(config.user_exclusions.clone());
+        let mut visited_inodes = HashSet::new();
+
+        let mut emitter = ProgressEmitter {
+            session_id: session_id.clone(),
+            start_time,
+            last_emit: Instant::now() - std::time::Duration::from_millis(100),
+            last_overall_progress: 0.0,
+            callback: progress_cb,
+            metrics: metrics.clone(),
+            discovered_items: 0,
+            discovered_bytes: 0,
+            safe_items_count: 0,
+            review_items_count: 0,
+        };
+
+        let total_stages = 7.0f32;
+        let stage_weight = 100.0f32 / total_stages;
+
+        // Helper macro/closure for running target lists through a stage
+        let mut run_stage = |targets: Vec<(ScanCategory, PathBuf, &'static str)>,
+                             stage_idx: usize,
+                             stage_id: &'static str,
+                             stage_name: &'static str,
+                             enabled: bool|
+         -> bool {
+            let base_overall = stage_idx as f32 * stage_weight;
+
+            if cancel_token.load(Ordering::Relaxed) {
+                was_cancelled.store(true, Ordering::Relaxed);
+                emitter.emit(
+                    stage_id,
+                    stage_name,
+                    "",
+                    "Scan Aborted",
+                    CategoryScanStatus::Partial,
+                    0.0,
+                    base_overall,
+                    true,
+                );
+                return false;
+            }
+
+            if !enabled {
+                emitter.emit(
+                    stage_id,
+                    stage_name,
+                    "Category disabled in scan configuration",
+                    "Skipped",
+                    CategoryScanStatus::Skipped,
+                    100.0,
+                    base_overall + stage_weight,
+                    true,
+                );
+                return true;
+            }
+
+            emitter.emit(
+                stage_id,
+                stage_name,
+                "Initializing category scope...",
+                "Scanning",
+                CategoryScanStatus::Scanning,
+                0.0,
+                base_overall,
+                true,
+            );
+
+            let total_targets = targets.len();
+            if total_targets == 0 {
+                emitter.emit(
+                    stage_id,
+                    stage_name,
+                    "No items found in scope",
+                    "Completed",
+                    CategoryScanStatus::Completed,
+                    100.0,
+                    base_overall + stage_weight,
+                    true,
+                );
+                return true;
+            }
+
+            for (k, (cat, path, desc)) in targets.into_iter().enumerate() {
+                if cancel_token.load(Ordering::Relaxed) {
+                    was_cancelled.store(true, Ordering::Relaxed);
+                    emitter.emit(
+                        stage_id,
+                        stage_name,
+                        &path.to_string_lossy(),
+                        "Scan Cancelled",
+                        CategoryScanStatus::Partial,
+                        (k as f32 / total_targets as f32) * 100.0,
+                        base_overall + ((k as f32 / total_targets as f32) * stage_weight),
+                        true,
+                    );
+                    return false;
+                }
+
+                let cat_prog = (k as f32 / total_targets as f32) * 100.0;
+                let current_overall = base_overall + (cat_prog / 100.0 * stage_weight);
+
+                emitter.emit(
+                    stage_id,
+                    stage_name,
+                    &path.to_string_lossy(),
+                    "Inspecting trees",
+                    CategoryScanStatus::Scanning,
+                    cat_prog,
+                    current_overall,
+                    false,
+                );
+
+                let mut local_skipped = Vec::new();
+                let (alloc_bytes, logical_bytes, file_count) = Self::measure_path_with_metrics(
+                    &path,
+                    &mut visited_inodes,
+                    &mut local_skipped,
+                    &user_exclusions,
+                    &cancel_token,
+                    &metrics,
+                );
+
+                if !local_skipped.is_empty() {
+                    skipped_collector.lock().unwrap().extend(local_skipped);
+                }
+
+                if alloc_bytes > 0 || logical_bytes > 0 {
+                    let name = path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| path.to_string_lossy().to_string());
+
+                    let id = format!("{}:{}", cat.display_name(), path.to_string_lossy());
+                    let modified_at = fs::metadata(&path)
+                        .ok()
+                        .and_then(|m| m.modified().ok())
+                        .map(|t| chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339());
+
+                    let (rule_id, disp_reason, risk, eligible, inelig_reason, app) =
+                        Self::classify_candidate_rule(cat, &path);
+
+                    let item = ScanItem {
+                        id,
+                        path: path.to_string_lossy().to_string(),
+                        name,
+                        category: cat,
+                        size_bytes: alloc_bytes,
+                        allocated_bytes: alloc_bytes,
+                        logical_bytes,
+                        file_count,
+                        modified_at,
+                        description: desc.to_string(),
+                        is_safe_to_clean: risk == RiskClassification::SafeToClean,
+                        is_selected: eligible && risk == RiskClassification::SafeToClean,
+                        classification: risk,
+                        detection_rule_id: rule_id,
+                        disposable_reason: disp_reason,
+                        is_eligible_for_cleanup: eligible,
+                        ineligibility_reason: inelig_reason,
+                        associated_app: app,
+                    };
+
+                    if risk == RiskClassification::SafeToClean {
+                        emitter.safe_items_count += 1;
+                    } else {
+                        emitter.review_items_count += 1;
+                    }
+                    emitter.discovered_items += 1;
+                    emitter.discovered_bytes += alloc_bytes;
+
+                    items_collector.lock().unwrap().push(item);
+
+                    emitter.emit(
+                        stage_id,
+                        stage_name,
+                        &path.to_string_lossy(),
+                        "Candidate Discovered",
+                        CategoryScanStatus::Scanning,
+                        ((k + 1) as f32 / total_targets as f32) * 100.0,
+                        base_overall + (((k + 1) as f32 / total_targets as f32) * stage_weight),
+                        true,
+                    );
+                }
+            }
+
+            emitter.emit(
+                stage_id,
+                stage_name,
+                "",
+                "Category Completed",
+                CategoryScanStatus::Completed,
+                100.0,
+                base_overall + stage_weight,
+                true,
+            );
+            true
+        };
+
+        // --- STAGE 0: System Cache ---
+        let mut stage0_targets = Vec::new();
+        let sys_caches = PathBuf::from("/Library/Caches");
+        if sys_caches.exists() && !SafetyGuard::is_mandatory_exclusion(&sys_caches) {
+            if let Ok(entries) = fs::read_dir(&sys_caches) {
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    if !SafetyGuard::is_mandatory_exclusion(&p) {
+                        stage0_targets.push((ScanCategory::SystemCaches, p, "System Cache Buffer"));
+                    }
+                }
+            }
+        }
+        let sys_updates = PathBuf::from("/Library/Updates");
+        if sys_updates.exists() && !SafetyGuard::is_mandatory_exclusion(&sys_updates) {
+            stage0_targets.push((ScanCategory::SystemCaches, sys_updates, "System Software Update Cache"));
+        }
+        for custom in &config.custom_paths {
+            let cp = PathBuf::from(custom);
+            if cp.exists() && !SafetyGuard::is_mandatory_exclusion(&cp) && !cp.starts_with(&home) {
+                stage0_targets.push((ScanCategory::SystemCaches, cp, "Custom System Path"));
+            }
+        }
+        let cont = run_stage(
+            stage0_targets,
+            0,
+            "system_cache",
+            "System Cache",
+            config.include_system_caches,
+        );
+
+        // --- STAGE 1: Application Cache ---
+        if cont {
+            let mut stage1_targets = Vec::new();
             let user_caches = home.join("Library/Caches");
-            if user_caches.exists() {
+            if user_caches.exists() && !SafetyGuard::is_mandatory_exclusion(&user_caches) {
                 if let Ok(entries) = fs::read_dir(&user_caches) {
                     for entry in entries.flatten() {
                         let path = entry.path();
                         let name = entry.file_name().to_string_lossy().to_string();
 
-                        // Specific subcategories take precedence
-                        if name.contains("Google") || name.contains("Brave") || name.contains("Safari") || name.contains("Firefox") || name.contains("Microsoft Edge") {
-                            if config.include_browser_caches {
-                                targets.push((ScanCategory::BrowserCaches, path, "Browser Web Cache"));
-                            }
-                        } else if name.contains("Slack") || name.contains("Discord") || name.contains("Telegram") || name.contains("Teams") || name.contains("com.tinyspeck.slackmacgap") {
-                            if config.include_messaging_caches {
-                                targets.push((ScanCategory::MessagingCaches, path, "Messaging App Cache"));
-                            }
-                        } else if name.contains("Homebrew") {
-                            if config.include_developer_caches {
-                                targets.push((ScanCategory::DeveloperCaches, path, "Homebrew Formula & Bottle Caches"));
-                            }
-                        } else if config.include_system_caches {
-                            targets.push((ScanCategory::SystemCaches, path, "Application Cache Directory"));
+                        // Filter out browsers, messaging, developer caches (handled in dedicated stages)
+                        let is_browser = name.contains("Google")
+                            || name.contains("Brave")
+                            || name.contains("Safari")
+                            || name.contains("Firefox")
+                            || name.contains("Microsoft Edge")
+                            || name.contains("Arc")
+                            || name.contains("com.vivaldi");
+                        let is_msg = name.contains("Slack")
+                            || name.contains("Discord")
+                            || name.contains("Telegram")
+                            || name.contains("Teams")
+                            || name.contains("com.tinyspeck.slackmacgap");
+                        let is_dev = name.contains("Homebrew")
+                            || name.contains("CocoaPods")
+                            || name.contains("Yarn");
+
+                        if !is_browser && !is_msg && !is_dev {
+                            stage1_targets.push((
+                                ScanCategory::SystemCaches,
+                                path,
+                                "Application Cache Directory",
+                            ));
                         }
                     }
                 }
             }
-        }
-
-        // 2. Application Logs
-        if config.include_application_logs {
-            let user_logs = home.join("Library/Logs");
-            if user_logs.exists() {
-                targets.push((ScanCategory::ApplicationLogs, user_logs, "User Application Logs"));
-            }
-            let diag_reports = home.join("Library/Logs/DiagnosticReports");
-            if diag_reports.exists() {
-                targets.push((ScanCategory::ApplicationLogs, diag_reports, "System Diagnostic & Crash Reports"));
-            }
-        }
-
-        // 3. Developer Space (Xcode)
-        if config.include_developer_xcode {
-            let xcode_derived = home.join("Library/Developer/Xcode/DerivedData");
-            if xcode_derived.exists() {
-                targets.push((ScanCategory::DeveloperXcode, xcode_derived, "Xcode Intermediate DerivedData"));
-            }
-            let xcode_archives = home.join("Library/Developer/Xcode/Archives");
-            if xcode_archives.exists() {
-                targets.push((ScanCategory::DeveloperXcode, xcode_archives, "Xcode Build Archives"));
-            }
-            let xcode_device_support = home.join("Library/Developer/Xcode/iOS DeviceSupport");
-            if xcode_device_support.exists() {
-                targets.push((ScanCategory::DeveloperXcode, xcode_device_support, "iOS Device Symbols & Support"));
-            }
-        }
-
-        // 4. Developer Tooling Caches
-        if config.include_developer_caches {
-            let cargo_registry = home.join(".cargo/registry/cache");
-            if cargo_registry.exists() {
-                targets.push((ScanCategory::DeveloperCaches, cargo_registry, "Rust Cargo Registry .crate Archives"));
-            }
-            let cargo_cache = home.join(".cargo/cache");
-            if cargo_cache.exists() {
-                targets.push((ScanCategory::DeveloperCaches, cargo_cache, "Rust Cargo Cache"));
-            }
-            let gradle_cache = home.join(".gradle/caches");
-            if gradle_cache.exists() {
-                targets.push((ScanCategory::DeveloperCaches, gradle_cache, "Gradle Dependency Caches"));
-            }
-            let cocoapods_cache = home.join("Library/Caches/CocoaPods");
-            if cocoapods_cache.exists() {
-                targets.push((ScanCategory::DeveloperCaches, cocoapods_cache, "CocoaPods Specs & Pod Archives"));
-            }
-            let yarn_cache = home.join("Library/Caches/Yarn");
-            if yarn_cache.exists() {
-                targets.push((ScanCategory::DeveloperCaches, yarn_cache, "Yarn Package Cache"));
-            }
-            let yarn_dotcache = home.join(".cache/yarn");
-            if yarn_dotcache.exists() {
-                targets.push((ScanCategory::DeveloperCaches, yarn_dotcache, "Yarn Global Cache"));
-            }
-            let npm_cache = home.join(".npm/_cacache");
-            if npm_cache.exists() {
-                targets.push((ScanCategory::DeveloperCaches, npm_cache, "NPM Package Cache"));
-            }
-            let pnpm_cache = home.join("Library/pnpm/store");
-            if pnpm_cache.exists() {
-                targets.push((ScanCategory::DeveloperCaches, pnpm_cache, "pnpm Store Cache"));
-            }
-        }
-
-        // 5. User Trash
-        if config.include_trash {
-            let trash_dir = home.join(".Trash");
-            if trash_dir.exists() {
-                targets.push((ScanCategory::UserTrash, trash_dir, "macOS Trash Bin"));
-            }
-        }
-
-        // 6. Mail Downloads (Narrowly scoped cache only)
-        if config.include_mail_downloads {
-            let mail_downloads = home.join("Library/Containers/com.apple.mail/Data/Library/Mail Downloads");
-            if mail_downloads.exists() {
-                targets.push((ScanCategory::MailDownloads, mail_downloads, "Mail Preview Attachments"));
-            }
-        }
-
-        // 7. Custom User-Selected Scopes
-        for custom in &config.custom_paths {
-            let cp = PathBuf::from(custom);
-            if cp.exists() && !SafetyGuard::is_mandatory_exclusion(&cp) {
-                targets.push((ScanCategory::SystemCaches, cp, "User Selected Folder"));
-            }
-        }
-
-        let total_targets = targets.len();
-        let items_collector = Arc::new(Mutex::new(Vec::new()));
-        let skipped_collector = Arc::new(Mutex::new(Vec::new()));
-        let scanned_count = Arc::new(Mutex::new(0usize));
-        let running_bytes = Arc::new(Mutex::new(0u64));
-        let was_cancelled = Arc::new(AtomicBool::new(false));
-        let user_exclusions = Arc::new(config.user_exclusions.clone());
-
-        // Process targets in parallel with Rayon
-        targets.into_par_iter().for_each(|(category, path, desc)| {
-            if cancel_token.load(Ordering::Relaxed) {
-                was_cancelled.store(true, Ordering::Relaxed);
-                return;
-            }
-
-            // Verify safety guard & mandatory exclusions
-            if SafetyGuard::is_mandatory_exclusion(&path) {
-                return;
-            }
-
-            // User exclusion filter
-            let path_str = path.to_string_lossy().to_string();
-            for excl in user_exclusions.iter() {
-                if path_str.starts_with(excl) {
-                    return;
-                }
-            }
-
-            let mut visited_inodes = HashSet::new();
-            let mut skipped_paths = Vec::new();
-
-            let (allocated_bytes, logical_bytes, file_count) = Self::measure_path_detailed(
-                &path,
-                &mut visited_inodes,
-                &mut skipped_paths,
-                &user_exclusions,
-                &cancel_token,
+            let cont = run_stage(
+                stage1_targets,
+                1,
+                "app_cache",
+                "Application Cache",
+                config.include_system_caches,
             );
 
-            if !skipped_paths.is_empty() {
-                let mut skipped_lock = skipped_collector.lock().unwrap();
-                skipped_lock.extend(skipped_paths);
-            }
+            // --- STAGE 2: Browser Cache ---
+            if cont {
+                let mut stage2_targets = Vec::new();
+                if user_caches.exists() {
+                    if let Ok(entries) = fs::read_dir(&user_caches) {
+                        for entry in entries.flatten() {
+                            let path = entry.path();
+                            let name = entry.file_name().to_string_lossy().to_string();
 
-            if allocated_bytes > 0 || logical_bytes > 0 {
-                let name = path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_else(|| path.to_string_lossy().to_string());
+                            if (name.contains("Google")
+                                || name.contains("Brave")
+                                || name.contains("Safari")
+                                || name.contains("Firefox")
+                                || name.contains("Microsoft Edge")
+                                || name.contains("Arc")
+                                || name.contains("com.vivaldi"))
+                                && config.include_browser_caches
+                            {
+                                stage2_targets.push((
+                                    ScanCategory::BrowserCaches,
+                                    path,
+                                    "Browser Web Cache",
+                                ));
+                            } else if (name.contains("Slack")
+                                || name.contains("Discord")
+                                || name.contains("Telegram")
+                                || name.contains("Teams")
+                                || name.contains("com.tinyspeck.slackmacgap"))
+                                && config.include_messaging_caches
+                            {
+                                stage2_targets.push((
+                                    ScanCategory::MessagingCaches,
+                                    path,
+                                    "Messaging App Cache",
+                                ));
+                            }
+                        }
+                    }
+                }
+                if config.include_mail_downloads {
+                    let mail_downloads = home
+                        .join("Library/Containers/com.apple.mail/Data/Library/Mail Downloads");
+                    if mail_downloads.exists() {
+                        stage2_targets.push((
+                            ScanCategory::MailDownloads,
+                            mail_downloads,
+                            "Mail Preview Attachments",
+                        ));
+                    }
+                }
+                let cont = run_stage(
+                    stage2_targets,
+                    2,
+                    "browser_cache",
+                    "Browser Cache",
+                    config.include_browser_caches || config.include_messaging_caches,
+                );
 
-                let id = format!("{}:{}", category.display_name(), path.to_string_lossy());
-                let modified_at = fs::metadata(&path)
-                    .ok()
-                    .and_then(|m| m.modified().ok())
-                    .map(|t| chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339());
-
-                let (detection_rule_id, disposable_reason, classification, is_eligible_for_cleanup, ineligibility_reason, associated_app) =
-                    Self::classify_candidate_rule(category, &path);
-
-                let item = ScanItem {
-                    id,
-                    path: path.to_string_lossy().to_string(),
-                    name,
-                    category,
-                    size_bytes: allocated_bytes,
-                    allocated_bytes,
-                    logical_bytes,
-                    file_count,
-                    modified_at,
-                    description: desc.to_string(),
-                    is_safe_to_clean: classification == RiskClassification::SafeToClean,
-                    is_selected: is_eligible_for_cleanup && classification == RiskClassification::SafeToClean,
-                    classification,
-                    detection_rule_id,
-                    disposable_reason,
-                    is_eligible_for_cleanup,
-                    ineligibility_reason,
-                    associated_app,
-                };
-
-                let mut list = items_collector.lock().unwrap();
-                list.push(item);
-
-                let mut bytes = running_bytes.lock().unwrap();
-                *bytes += allocated_bytes;
-            }
-
-            let mut count = scanned_count.lock().unwrap();
-            *count += 1;
-            let current_count = *count;
-            let current_bytes = *running_bytes.lock().unwrap();
-
-            // Progress percentage is calculated against configured target scopes
-            let percent = if total_targets > 0 {
-                (current_count as f32 / total_targets as f32) * 100.0
-            } else {
-                -1.0
-            };
-
-            let progress = ScanProgress {
-                phase: "Scanning Configured Scopes".into(),
-                current_category: category.display_name().into(),
-                current_path: path.to_string_lossy().to_string(),
-                items_found: items_collector.lock().unwrap().len(),
-                bytes_found: current_bytes,
-                percent_complete: percent,
-            };
-            progress_cb(progress);
-        });
-
-        // 8. Large Files detection (explicit threshold, default >100MB in ~/Downloads)
-        if config.include_large_files && !cancel_token.load(Ordering::Relaxed) {
-            let threshold_bytes = config.large_files_min_mb.unwrap_or(100) * 1024 * 1024;
-            let downloads = home.join("Downloads");
-
-            if downloads.exists() {
-                for entry_res in WalkDir::new(&downloads)
-                    .max_depth(2)
-                    .follow_links(false)
-                    .into_iter()
-                {
-                    if cancel_token.load(Ordering::Relaxed) {
-                        was_cancelled.store(true, Ordering::Relaxed);
-                        break;
+                // --- STAGE 3: Developer Cache ---
+                if cont {
+                    let mut stage3_targets = Vec::new();
+                    if config.include_developer_xcode {
+                        let xcode_derived = home.join("Library/Developer/Xcode/DerivedData");
+                        if xcode_derived.exists() {
+                            stage3_targets.push((
+                                ScanCategory::DeveloperXcode,
+                                xcode_derived,
+                                "Xcode Intermediate DerivedData",
+                            ));
+                        }
+                        let xcode_archives = home.join("Library/Developer/Xcode/Archives");
+                        if xcode_archives.exists() {
+                            stage3_targets.push((
+                                ScanCategory::DeveloperXcode,
+                                xcode_archives,
+                                "Xcode Build Archives",
+                            ));
+                        }
+                        let xcode_device = home.join("Library/Developer/Xcode/iOS DeviceSupport");
+                        if xcode_device.exists() {
+                            stage3_targets.push((
+                                ScanCategory::DeveloperXcode,
+                                xcode_device,
+                                "iOS Device Symbols & Support",
+                            ));
+                        }
                     }
 
-                    let entry = match entry_res {
-                        Ok(e) => e,
-                        Err(e) => {
-                            let p = e.path().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
-                            skipped_collector.lock().unwrap().push(SkippedPath {
-                                path: p,
-                                reason: e.to_string(),
-                            });
-                            continue;
+                    if config.include_developer_caches {
+                        let cargo_registry = home.join(".cargo/registry/cache");
+                        if cargo_registry.exists() {
+                            stage3_targets.push((
+                                ScanCategory::DeveloperCaches,
+                                cargo_registry,
+                                "Rust Cargo Registry .crate Archives",
+                            ));
                         }
-                    };
+                        let cargo_cache = home.join(".cargo/cache");
+                        if cargo_cache.exists() {
+                            stage3_targets.push((
+                                ScanCategory::DeveloperCaches,
+                                cargo_cache,
+                                "Rust Cargo Cache",
+                            ));
+                        }
+                        let gradle_cache = home.join(".gradle/caches");
+                        if gradle_cache.exists() {
+                            stage3_targets.push((
+                                ScanCategory::DeveloperCaches,
+                                gradle_cache,
+                                "Gradle Dependency Caches",
+                            ));
+                        }
+                        let cocoapods_cache = home.join("Library/Caches/CocoaPods");
+                        if cocoapods_cache.exists() {
+                            stage3_targets.push((
+                                ScanCategory::DeveloperCaches,
+                                cocoapods_cache,
+                                "CocoaPods Specs & Pod Archives",
+                            ));
+                        }
+                        let yarn_cache = home.join("Library/Caches/Yarn");
+                        if yarn_cache.exists() {
+                            stage3_targets.push((
+                                ScanCategory::DeveloperCaches,
+                                yarn_cache,
+                                "Yarn Package Cache",
+                            ));
+                        }
+                        let yarn_dotcache = home.join(".cache/yarn");
+                        if yarn_dotcache.exists() {
+                            stage3_targets.push((
+                                ScanCategory::DeveloperCaches,
+                                yarn_dotcache,
+                                "Yarn Global Cache",
+                            ));
+                        }
+                        let npm_cache = home.join(".npm/_cacache");
+                        if npm_cache.exists() {
+                            stage3_targets.push((
+                                ScanCategory::DeveloperCaches,
+                                npm_cache,
+                                "NPM Package Cache",
+                            ));
+                        }
+                        let pnpm_cache = home.join("Library/pnpm/store");
+                        if pnpm_cache.exists() {
+                            stage3_targets.push((
+                                ScanCategory::DeveloperCaches,
+                                pnpm_cache,
+                                "pnpm Store Cache",
+                            ));
+                        }
+                        let brew_cache = home.join("Library/Caches/Homebrew");
+                        if brew_cache.exists() {
+                            stage3_targets.push((
+                                ScanCategory::DeveloperCaches,
+                                brew_cache,
+                                "Homebrew Formula & Bottle Caches",
+                            ));
+                        }
+                    }
+                    let cont = run_stage(
+                        stage3_targets,
+                        3,
+                        "developer_cache",
+                        "Developer Cache",
+                        config.include_developer_xcode || config.include_developer_caches,
+                    );
 
-                    let p = entry.path();
-                    if p.is_file() {
-                        if let Ok(meta) = p.symlink_metadata() {
-                            let alloc = meta.blocks() * 512;
-                            let logical = meta.len();
-                            if logical >= threshold_bytes || alloc >= threshold_bytes {
-                                let name = p.file_name().unwrap_or_default().to_string_lossy().to_string();
-                                let modified_at = meta.modified().ok().map(|t| chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339());
-                                let (detection_rule_id, disposable_reason, classification, is_eligible_for_cleanup, ineligibility_reason, associated_app) =
-                                    Self::classify_candidate_rule(ScanCategory::LargeFiles, p);
-                                let item = ScanItem {
-                                    id: format!("large:{}", p.to_string_lossy()),
-                                    path: p.to_string_lossy().to_string(),
-                                    name,
-                                    category: ScanCategory::LargeFiles,
-                                    size_bytes: alloc,
-                                    allocated_bytes: alloc,
-                                    logical_bytes: logical,
-                                    file_count: 1,
-                                    modified_at,
-                                    description: "Large file located in Downloads folder".into(),
-                                    is_safe_to_clean: false, // Large files strictly require manual review
-                                    is_selected: false,
-                                    classification,
-                                    detection_rule_id,
-                                    disposable_reason,
-                                    is_eligible_for_cleanup,
-                                    ineligibility_reason,
-                                    associated_app,
-                                };
-                                let mut list = items_collector.lock().unwrap();
-                                list.push(item);
+                    // --- STAGE 4: Logs & Temporary Files ---
+                    if cont {
+                        let mut stage4_targets = Vec::new();
+                        let user_logs = home.join("Library/Logs");
+                        if user_logs.exists() {
+                            stage4_targets.push((
+                                ScanCategory::ApplicationLogs,
+                                user_logs,
+                                "User Application Logs",
+                            ));
+                        }
+                        let diag_reports = home.join("Library/Logs/DiagnosticReports");
+                        if diag_reports.exists() {
+                            stage4_targets.push((
+                                ScanCategory::ApplicationLogs,
+                                diag_reports,
+                                "System Diagnostic & Crash Reports",
+                            ));
+                        }
+                        let sys_diag = PathBuf::from("/Library/Logs/DiagnosticReports");
+                        if sys_diag.exists() && !SafetyGuard::is_mandatory_exclusion(&sys_diag) {
+                            stage4_targets.push((
+                                ScanCategory::ApplicationLogs,
+                                sys_diag,
+                                "Global Diagnostic Reports",
+                            ));
+                        }
+                        let cont = run_stage(
+                            stage4_targets,
+                            4,
+                            "logs_and_temp",
+                            "Logs & Temporary Files",
+                            config.include_application_logs,
+                        );
+
+                        // --- STAGE 5: macOS Trash & Large Files ---
+                        if cont {
+                            let mut stage5_targets = Vec::new();
+                            let trash_dir = home.join(".Trash");
+                            if trash_dir.exists() {
+                                if let Ok(entries) = fs::read_dir(&trash_dir) {
+                                    for entry in entries.flatten() {
+                                        let p = entry.path();
+                                        stage5_targets.push((
+                                            ScanCategory::UserTrash,
+                                            p,
+                                            "macOS Trash Bin Item",
+                                        ));
+                                    }
+                                }
+                            }
+                            let cont = run_stage(
+                                stage5_targets,
+                                5,
+                                "user_trash",
+                                "macOS Trash",
+                                config.include_trash,
+                            );
+
+                            // Inspect Large Files in Downloads if configured
+                            if cont && config.include_large_files && !cancel_token.load(Ordering::Relaxed) {
+                                let threshold_bytes =
+                                    config.large_files_min_mb.unwrap_or(100) * 1024 * 1024;
+                                let downloads = home.join("Downloads");
+                                if downloads.exists() {
+                                    for entry_res in WalkDir::new(&downloads)
+                                        .max_depth(2)
+                                        .follow_links(false)
+                                        .into_iter()
+                                    {
+                                        if cancel_token.load(Ordering::Relaxed) {
+                                            was_cancelled.store(true, Ordering::Relaxed);
+                                            break;
+                                        }
+
+                                        let entry = match entry_res {
+                                            Ok(e) => e,
+                                            Err(e) => {
+                                                let p = e
+                                                    .path()
+                                                    .map(|p| p.to_string_lossy().to_string())
+                                                    .unwrap_or_default();
+                                                skipped_collector.lock().unwrap().push(
+                                                    SkippedPath {
+                                                        path: p,
+                                                        reason: e.to_string(),
+                                                    },
+                                                );
+                                                continue;
+                                            }
+                                        };
+
+                                        let p = entry.path();
+                                        if p.is_file() {
+                                            if let Ok(meta) = p.symlink_metadata() {
+                                                let alloc = meta.blocks() * 512;
+                                                let logical = meta.len();
+                                                if logical >= threshold_bytes
+                                                    || alloc >= threshold_bytes
+                                                {
+                                                    let name = p
+                                                        .file_name()
+                                                        .unwrap_or_default()
+                                                        .to_string_lossy()
+                                                        .to_string();
+                                                    let modified_at = meta
+                                                        .modified()
+                                                        .ok()
+                                                        .map(|t| {
+                                                            chrono::DateTime::<chrono::Utc>::from(
+                                                                t,
+                                                            )
+                                                            .to_rfc3339()
+                                                        });
+                                                    let (
+                                                        detection_rule_id,
+                                                        disposable_reason,
+                                                        classification,
+                                                        is_eligible_for_cleanup,
+                                                        ineligibility_reason,
+                                                        associated_app,
+                                                    ) = Self::classify_candidate_rule(
+                                                        ScanCategory::LargeFiles,
+                                                        p,
+                                                    );
+                                                    let item = ScanItem {
+                                                        id: format!("large:{}", p.to_string_lossy()),
+                                                        path: p.to_string_lossy().to_string(),
+                                                        name,
+                                                        category: ScanCategory::LargeFiles,
+                                                        size_bytes: alloc,
+                                                        allocated_bytes: alloc,
+                                                        logical_bytes: logical,
+                                                        file_count: 1,
+                                                        modified_at,
+                                                        description:
+                                                            "Large file located in Downloads folder"
+                                                                .into(),
+                                                        is_safe_to_clean: false,
+                                                        is_selected: false,
+                                                        classification,
+                                                        detection_rule_id,
+                                                        disposable_reason,
+                                                        is_eligible_for_cleanup,
+                                                        ineligibility_reason,
+                                                        associated_app,
+                                                    };
+                                                    emitter.review_items_count += 1;
+                                                    emitter.discovered_items += 1;
+                                                    emitter.discovered_bytes += alloc;
+                                                    items_collector.lock().unwrap().push(item);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // --- STAGE 6: Docker Resources ---
+                            if cont {
+                                let stage6_base = 6.0 * stage_weight;
+                                if !config.include_docker {
+                                    emitter.emit(
+                                        "docker",
+                                        "Docker Resources",
+                                        "Docker scanning disabled in configuration",
+                                        "Skipped",
+                                        CategoryScanStatus::Skipped,
+                                        100.0,
+                                        stage6_base + stage_weight,
+                                        true,
+                                    );
+                                } else {
+                                    emitter.emit(
+                                        "docker",
+                                        "Docker Resources",
+                                        "Checking Docker CLI & daemon status...",
+                                        "Scanning",
+                                        CategoryScanStatus::Scanning,
+                                        10.0,
+                                        stage6_base + 2.0,
+                                        true,
+                                    );
+
+                                    let dstatus = crate::docker::DockerManager::check_status();
+                                    if !dstatus.cli_available || !dstatus.daemon_running {
+                                        let skip_msg = if !dstatus.cli_available {
+                                            "Docker CLI not found on system"
+                                        } else {
+                                            "Docker daemon is not running (skipped safely)"
+                                        };
+                                        emitter.emit(
+                                            "docker",
+                                            "Docker Resources",
+                                            skip_msg,
+                                            "Skipped",
+                                            CategoryScanStatus::Skipped,
+                                            100.0,
+                                            stage6_base + stage_weight,
+                                            true,
+                                        );
+                                    } else {
+                                        emitter.emit(
+                                            "docker",
+                                            "Docker Resources",
+                                            "Inspecting Docker storage & dangling images...",
+                                            "Scanning",
+                                            CategoryScanStatus::Scanning,
+                                            50.0,
+                                            stage6_base + 7.0,
+                                            true,
+                                        );
+
+                                        if let Ok(dres) = crate::docker::DockerManager::inspect() {
+                                            if dres.summary.images_reclaimable_bytes > 0 {
+                                                let count = dres
+                                                    .resources
+                                                    .iter()
+                                                    .filter(|r| {
+                                                        r.resource_type
+                                                            == crate::docker::DockerResourceType::DanglingImage
+                                                    })
+                                                    .count();
+                                                let item = ScanItem {
+                                                    id: "docker:dangling-images".into(),
+                                                    path: "docker://dangling-images".into(),
+                                                    name: format!("Dangling Docker Images ({} images)", count),
+                                                    category: ScanCategory::Docker,
+                                                    size_bytes: dres.summary.images_reclaimable_bytes,
+                                                    allocated_bytes: dres.summary.images_reclaimable_bytes,
+                                                    logical_bytes: dres.summary.images_reclaimable_bytes,
+                                                    file_count: count,
+                                                    modified_at: None,
+                                                    description: "Untagged dangling image layers not referenced by any container.".into(),
+                                                    is_safe_to_clean: false,
+                                                    is_selected: false,
+                                                    classification: RiskClassification::ReviewRequired,
+                                                    detection_rule_id: "RULE_DOCKER_DANGLING_IMAGES".into(),
+                                                    disposable_reason: "Dangling layers left over from builds. Safe to prune.".into(),
+                                                    is_eligible_for_cleanup: true,
+                                                    ineligibility_reason: None,
+                                                    associated_app: Some("Docker".into()),
+                                                };
+                                                emitter.review_items_count += 1;
+                                                emitter.discovered_items += 1;
+                                                emitter.discovered_bytes += dres.summary.images_reclaimable_bytes;
+                                                items_collector.lock().unwrap().push(item);
+                                            }
+
+                                            if dres.summary.build_cache_reclaimable_bytes > 0 {
+                                                let count = dres.summary.build_cache_count;
+                                                let item = ScanItem {
+                                                    id: "docker:build-cache".into(),
+                                                    path: "docker://build-cache".into(),
+                                                    name: format!("Docker BuildKit Cache ({} records)", count),
+                                                    category: ScanCategory::Docker,
+                                                    size_bytes: dres.summary.build_cache_reclaimable_bytes,
+                                                    allocated_bytes: dres.summary.build_cache_reclaimable_bytes,
+                                                    logical_bytes: dres.summary.build_cache_reclaimable_bytes,
+                                                    file_count: count,
+                                                    modified_at: None,
+                                                    description: "BuildKit intermediate compiler cache layers. Recreated on subsequent builds.".into(),
+                                                    is_safe_to_clean: false,
+                                                    is_selected: false,
+                                                    classification: RiskClassification::ReviewRequired,
+                                                    detection_rule_id: "RULE_DOCKER_BUILD_CACHE".into(),
+                                                    disposable_reason: "Build cache layers are regenerated on future docker build runs.".into(),
+                                                    is_eligible_for_cleanup: true,
+                                                    ineligibility_reason: None,
+                                                    associated_app: Some("Docker".into()),
+                                                };
+                                                emitter.review_items_count += 1;
+                                                emitter.discovered_items += 1;
+                                                emitter.discovered_bytes += dres.summary.build_cache_reclaimable_bytes;
+                                                items_collector.lock().unwrap().push(item);
+                                            }
+                                        }
+
+                                        emitter.emit(
+                                            "docker",
+                                            "Docker Resources",
+                                            "Docker inspection completed",
+                                            "Completed",
+                                            CategoryScanStatus::Completed,
+                                            100.0,
+                                            100.0,
+                                            true,
+                                        );
+                                    }
+                                }
                             }
                         }
                     }
                 }
             }
+        }
+
+        // Final completion event strictly if not cancelled
+        if !was_cancelled.load(Ordering::Relaxed) {
+            emitter.emit(
+                "docker",
+                "Docker Resources",
+                "System scan complete",
+                "Analysis Complete",
+                CategoryScanStatus::Completed,
+                100.0,
+                100.0,
+                true,
+            );
         }
 
         let mut items = Arc::try_unwrap(items_collector).unwrap().into_inner().unwrap();
@@ -804,6 +1438,7 @@ impl Scanner {
             ScanCategory::UserTrash,
             ScanCategory::MailDownloads,
             ScanCategory::LargeFiles,
+            ScanCategory::Docker,
         ];
 
         let mut categories = Vec::new();

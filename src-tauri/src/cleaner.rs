@@ -103,6 +103,48 @@ impl Cleaner {
                 break;
             }
 
+            if path_str == "docker://dangling-images" {
+                if req.dry_run {
+                    items_deleted += 1;
+                } else if let Some(cli) = crate::docker::DockerManager::find_docker_cli() {
+                    if let Ok(out) = std::process::Command::new(cli).args(["image", "prune", "-f"]).output() {
+                        if out.status.success() {
+                            let stdout = String::from_utf8_lossy(&out.stdout);
+                            if let Some(pos) = stdout.find("Total reclaimed space:") {
+                                let sub = &stdout[pos + 22..];
+                                let space_str = sub.split_whitespace().next().unwrap_or_default();
+                                let freed = crate::docker::DockerManager::parse_docker_size(space_str);
+                                bytes_freed += freed;
+                                bytes_moved_to_trash += freed;
+                            }
+                            items_deleted += 1;
+                        }
+                    }
+                }
+                continue;
+            }
+
+            if path_str == "docker://build-cache" {
+                if req.dry_run {
+                    items_deleted += 1;
+                } else if let Some(cli) = crate::docker::DockerManager::find_docker_cli() {
+                    if let Ok(out) = std::process::Command::new(cli).args(["builder", "prune", "-f"]).output() {
+                        if out.status.success() {
+                            let stdout = String::from_utf8_lossy(&out.stdout);
+                            if let Some(pos) = stdout.find("Total reclaimed space:") {
+                                let sub = &stdout[pos + 22..];
+                                let space_str = sub.split_whitespace().next().unwrap_or_default();
+                                let freed = crate::docker::DockerManager::parse_docker_size(space_str);
+                                bytes_freed += freed;
+                                bytes_moved_to_trash += freed;
+                            }
+                            items_deleted += 1;
+                        }
+                    }
+                }
+                continue;
+            }
+
             let p = PathBuf::from(path_str);
 
             if !p.exists() {
