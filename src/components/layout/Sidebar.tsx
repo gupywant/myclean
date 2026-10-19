@@ -188,13 +188,13 @@ export const Sidebar: React.FC = () => {
             />
             <span>macOS Trash</span>
           </span>
-          <div className="flex items-center space-x-1 font-mono">
+          <div className="flex items-center space-x-1.5 font-mono">
             <span className="text-slate-300 group-hover/trash:text-white font-medium">
               {formatBytes(trashBytes)}
             </span>
             {trashItemCount > 0 && (
               <span className="text-[10px] text-slate-500">
-                ({trashItemCount})
+                ({trashItemCount.toLocaleString()} {trashItemCount === 1 ? "item" : "items"})
               </span>
             )}
           </div>
