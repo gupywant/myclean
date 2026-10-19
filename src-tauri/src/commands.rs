@@ -41,6 +41,15 @@ pub async fn get_system_metrics() -> Result<SystemSummary, String> {
 }
 
 #[tauri::command]
+pub fn open_trash_folder() -> Result<(), String> {
+    if let Some(home) = dirs::home_dir() {
+        let trash_dir = home.join(".Trash");
+        let _ = std::process::Command::new("open").arg(&trash_dir).spawn();
+    }
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn start_scan(
     app: AppHandle,
     state: State<'_, AppState>,

@@ -67,6 +67,8 @@ const MOCK_SYSTEM_SUMMARY: SystemSummary = {
     total_swap_bytes: 4294967296,
     used_swap_bytes: 0,
   },
+  trash_bytes: 1420580000,
+  trash_item_count: 18,
 };
 
 const MOCK_SCAN_RESULT: ScanResult = {
@@ -182,6 +184,13 @@ export const api = {
       return MOCK_SYSTEM_SUMMARY;
     }
     return invoke<SystemSummary>("get_system_metrics");
+  },
+
+  async openTrashFolder(): Promise<void> {
+    if (!isTauriEnvironment()) {
+      return;
+    }
+    return invoke<void>("open_trash_folder");
   },
 
   async startScan(config?: ScanScopeConfig): Promise<ScanResult> {

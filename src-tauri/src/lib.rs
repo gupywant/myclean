@@ -49,6 +49,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_system_metrics,
+            commands::open_trash_folder,
             commands::start_scan,
             commands::cancel_scan,
             commands::clean_items,

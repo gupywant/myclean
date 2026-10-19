@@ -27,6 +27,7 @@ chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2.0"
 anyhow = "1.0"
 dirs = "6.0"
+libc = "0.2"
 tauri-plugin-notification = "2"
 mac-notification-sys = "0.6"
 

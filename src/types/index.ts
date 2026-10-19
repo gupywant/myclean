@@ -59,6 +59,8 @@ export interface SystemSummary {
   primary_disk: DiskMetric | null;
   all_disks: DiskMetric[];
   memory: MemoryMetric;
+  trash_bytes?: number;
+  trash_item_count?: number;
 }
 
 export type ScanCategoryType =

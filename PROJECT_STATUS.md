@@ -446,6 +446,14 @@
   - Switched all cleanup modules (`cleaner.rs`, `apps.rs`, `developer.rs`, `duplicates.rs`) to silent Cocoa trashing.
   - Deletions are now completely silent, significantly faster, and remain 100% recoverable in the macOS Trash.
   - Added unit test `test_silent_trash_execution` (103/103 cargo tests passing).
+- [x] **Sidebar Storage Refresh & macOS Trash Metrics Integration:**
+  - Added interactive live storage refresh button (`ArrowsClockwise`) in `Sidebar.tsx` bottom quick storage widget.
+  - Implemented `SystemTelemetry::get_trash_metrics()` computing real-time macOS Trash size across `~/.Trash` and volume-mounted `.Trashes/<uid>`.
+  - Added intelligent fallback to SQLite audit records if direct `~/.Trash` directory traversal is denied by macOS TCC privacy.
+  - Added dedicated **macOS Trash** row in the sidebar storage widget showing live formatted Trash size and item count with Phosphor `Trash` icon.
+  - One-click shortcut on the Trash row (`api.openTrashFolder()`) reveals the macOS Trash directly in Finder.
+  - Added auto-refresh on window focus so external file deletions and Finder actions immediately reflect in the sidebar.
+  - Added unit test `test_trash_metrics_gathering` (104/104 cargo tests passing).
 
 ### Phase 12: Homebrew Tap & Update Checker (Planned / Next)
 - [ ] Create Homebrew Tap (`gupywant/homebrew-tap`) and Cask formula (`Casks/myclean.rb`).
