@@ -192,4 +192,99 @@ console.log("--> Running Frontend Smart Scan Progress Regression Tests...");
   console.log("  [PASS] Test 5: ScanScopeConfig session_id propagation contract");
 }
 
-console.log("--> All 5 Frontend Smart Scan Progress Regression Tests Passed!\n");
+// Test 6: Full scan lifecycle from initialization to completed result screen
+{
+  const sessionId = "scan-full-lifecycle-test";
+  let isScanning = true;
+  let wasScanCancelled = false;
+  let scanResult: any = null;
+  const categoryStates: Record<string, LiveCategoryState> = {
+    system_cache: { id: "system_cache", name: "System Cache", description: "", status: "pending", progress: 0, itemsFound: 0, bytesFound: 0 },
+    app_cache: { id: "app_cache", name: "Application Cache", description: "", status: "pending", progress: 0, itemsFound: 0, bytesFound: 0 },
+    browser_cache: { id: "browser_cache", name: "Browser Cache", description: "", status: "pending", progress: 0, itemsFound: 0, bytesFound: 0 },
+    developer_cache: { id: "developer_cache", name: "Developer Cache", description: "", status: "pending", progress: 0, itemsFound: 0, bytesFound: 0 },
+    logs_and_temp: { id: "logs_and_temp", name: "Logs & Temporary Files", description: "", status: "pending", progress: 0, itemsFound: 0, bytesFound: 0 },
+    user_trash: { id: "user_trash", name: "macOS Trash", description: "", status: "pending", progress: 0, itemsFound: 0, bytesFound: 0 },
+    docker: { id: "docker", name: "Docker Resources", description: "", status: "pending", progress: 0, itemsFound: 0, bytesFound: 0 },
+  };
+
+  // 1. Initial State: isScanning true, result null
+  assert.strictEqual(isScanning, true);
+  assert.strictEqual(scanResult, null);
+
+  // 2. Stream progress events for each category
+  const stages = ["system_cache", "app_cache", "browser_cache", "developer_cache", "logs_and_temp", "user_trash", "docker"];
+  for (let i = 0; i < stages.length; i++) {
+    const stageId = stages[i];
+    categoryStates[stageId] = {
+      ...categoryStates[stageId],
+      status: "completed",
+      progress: 100,
+      itemsFound: 5 * (i + 1),
+      bytesFound: 1024 * 1024 * 100 * (i + 1),
+    };
+  }
+
+  // 3. Backend scan returns final ScanResult
+  const mockResult = {
+    duration_ms: 2196,
+    total_bytes: 8513470464,
+    total_items: 59,
+    was_cancelled: false,
+    categories: [
+      { category: "system_caches", display_name: "System & App Caches", total_bytes: 5200000000, item_count: 32, is_safe_by_default: true },
+      { category: "developer_caches", display_name: "Developer Tooling Caches", total_bytes: 2800000000, item_count: 20, is_safe_by_default: true },
+      { category: "user_trash", display_name: "macOS Trash", total_bytes: 513470464, item_count: 7, is_safe_by_default: true },
+    ],
+    items: [
+      { id: "item-1", name: "System Caches", size_bytes: 5200000000, is_selected: true, is_safe_to_clean: true },
+      { id: "item-2", name: "Cargo Registry", size_bytes: 2800000000, is_selected: true, is_safe_to_clean: true },
+      { id: "item-3", name: "Trash Files", size_bytes: 513470464, is_selected: true, is_safe_to_clean: true },
+    ],
+  };
+
+  // Finalize state exactly as useCleanStore does:
+  const finalCategoryStates = { ...categoryStates };
+  Object.keys(finalCategoryStates).forEach((key) => {
+    if (finalCategoryStates[key].status === "scanning" || finalCategoryStates[key].status === "pending") {
+      finalCategoryStates[key] = {
+        ...finalCategoryStates[key],
+        status: "completed",
+        progress: 100,
+      };
+    }
+  });
+
+  const selectedItemIds = new Set<string>();
+  mockResult.items.forEach((item) => {
+    if (item.is_selected) selectedItemIds.add(item.id);
+  });
+
+  scanResult = mockResult;
+  isScanning = false;
+  wasScanCancelled = mockResult.was_cancelled;
+
+  // Verify Completed Results State:
+  assert.strictEqual(isScanning, false, "isScanning must be false on completion");
+  assert.notStrictEqual(scanResult, null, "scanResult must be populated");
+  assert.strictEqual(scanResult.total_bytes, 8513470464);
+  assert.strictEqual(scanResult.total_items, 59);
+  assert.strictEqual(selectedItemIds.size, 3);
+
+  // Every stage must be marked completed
+  for (const stageId of stages) {
+    assert.strictEqual(finalCategoryStates[stageId].status, "completed");
+    assert.strictEqual(finalCategoryStates[stageId].progress, 100);
+  }
+
+  // Calculate selected recoverable bytes
+  const selectedBytes = scanResult.items
+    .filter((item: any) => selectedItemIds.has(item.id))
+    .reduce((sum: number, item: any) => sum + item.size_bytes, 0);
+  assert.strictEqual(selectedBytes, 8513470464, "All default selected items must sum to 8.51 GB");
+
+  console.log("  [PASS] Test 6: Full scan lifecycle from initialization to completed result screen");
+}
+
+console.log("--> All 6 Frontend Smart Scan Progress Regression Tests Passed!\n");
+

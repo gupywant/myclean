@@ -543,9 +543,24 @@ export const useCleanStore = create<CleanState>((set, get) => ({
         }
       });
 
+      // Defensive guarantee: Ensure all category states are marked as completed if scan finished successfully
+      const finalCategoryStates = { ...get().categoryStates };
+      if (!result.was_cancelled) {
+        Object.keys(finalCategoryStates).forEach((key) => {
+          if (finalCategoryStates[key].status === "scanning" || finalCategoryStates[key].status === "pending") {
+            finalCategoryStates[key] = {
+              ...finalCategoryStates[key],
+              status: "completed",
+              progress: 100,
+            };
+          }
+        });
+      }
+
       set({
         scanResult: result,
         selectedItemIds: defaultSelected,
+        categoryStates: finalCategoryStates,
         isScanning: false,
         wasScanCancelled: result.was_cancelled,
         scanError: null,
