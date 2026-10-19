@@ -34,7 +34,7 @@ import type {
 } from "../types";
 
 export const isTauriEnvironment = (): boolean => {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+  return typeof window !== "undefined" && ("__TAURI_INTERNALS__" in window || window.location.search.includes("env=tauri"));
 };
 
 // Fallback mock data when running in pure browser for preview
