@@ -502,3 +502,110 @@ export interface DockerCleanResult {
   disclaimer: string;
 }
 
+// ---------------------------------------------------------------------------
+// Phase 08 Settings, Exclusions & History Types
+// ---------------------------------------------------------------------------
+
+export interface AppPreferences {
+  theme: "dark" | "light" | "system";
+  accent_color: "violet" | "cyan" | "indigo";
+  animation_intensity: "full" | "reduced" | "off";
+  dry_run_default: boolean;
+  move_to_trash_only: boolean;
+  confirm_before_cleanup: boolean;
+  large_file_threshold_mb: number;
+  low_disk_warning_threshold_gb: number;
+  history_retention: "30_days" | "90_days" | "180_days" | "forever";
+  notify_scan_complete: boolean;
+  notify_clean_complete: boolean;
+  notify_clean_failure: boolean;
+  notify_low_disk_space: boolean;
+  scan_reminder_interval: "off" | "daily" | "weekly" | "monthly";
+  cpu_thread_limit: number;
+  default_categories: string[];
+  developer_workspaces: string[];
+}
+
+export interface ExclusionDescriptor {
+  id: number | null;
+  path: string;
+  category: string;
+  reason: string;
+  is_mandatory: boolean;
+  source: "system" | "user_identity" | "custom";
+  added_at: string;
+}
+
+export interface HistoryQueryRequest {
+  page: number;
+  page_size: number;
+  start_date?: string | null;
+  end_date?: string | null;
+  category?: string | null;
+  dry_run_only?: boolean | null;
+  search_query?: string | null;
+  sort_by?: "id" | "bytes_freed" | "items_deleted" | null;
+  sort_order?: "asc" | "desc" | null;
+}
+
+export interface CleanupHistoryItem {
+  id: number;
+  timestamp: string;
+  category: string;
+  cleanup_source: string;
+  is_dry_run: boolean;
+  bytes_moved_to_trash: number;
+  estimated_reclaimable_bytes: number;
+  verified_host_disk_freed: number | null;
+  items_deleted: number;
+  items_skipped: number;
+  items_failed: number;
+  method: string;
+  status: "success" | "partial" | "failed";
+  details_json: string;
+  error_summary: string | null;
+}
+
+export interface HistoryQueryResponse {
+  items: CleanupHistoryItem[];
+  total_count: number;
+  total_pages: number;
+  current_page: number;
+  total_bytes_moved_to_trash: number;
+  total_items_deleted: number;
+}
+
+export interface CategoryStorageMetric {
+  category: string;
+  bytes: number;
+  items: number;
+}
+
+export interface DailyTrendMetric {
+  date: string;
+  bytes_moved_to_trash: number;
+  operations: number;
+}
+
+export interface CleanupAnalyticsSummary {
+  total_operations: number;
+  total_files_moved_to_trash: number;
+  total_bytes_moved_to_trash: number;
+  total_dry_run_operations: number;
+  developer_bytes_moved: number;
+  docker_bytes_reclaimed: number;
+  storage_by_category: CategoryStorageMetric[];
+  daily_trends: DailyTrendMetric[];
+}
+
+export interface DatabaseHealthReport {
+  is_healthy: boolean;
+  integrity_status: string;
+  schema_version: number;
+  database_size_bytes: number;
+  total_cleanup_records: number;
+  total_scan_records: number;
+  total_exclusions: number;
+}
+
+

@@ -25,6 +25,12 @@ import type {
   DockerScanResult,
   DockerCleanRequest,
   DockerCleanResult,
+  AppPreferences,
+  ExclusionDescriptor,
+  HistoryQueryRequest,
+  HistoryQueryResponse,
+  CleanupAnalyticsSummary,
+  DatabaseHealthReport,
 } from "../types";
 
 export const isTauriEnvironment = (): boolean => {
@@ -876,6 +882,242 @@ export const api = {
       return;
     }
     return invoke<void>("open_in_finder", { path });
+  },
+
+  async getPreferences(): Promise<AppPreferences> {
+    if (!isTauriEnvironment()) {
+      return {
+        theme: "dark",
+        accent_color: "violet",
+        animation_intensity: "full",
+        dry_run_default: false,
+        move_to_trash_only: true,
+        confirm_before_cleanup: true,
+        large_file_threshold_mb: 100,
+        low_disk_warning_threshold_gb: 15,
+        history_retention: "90_days",
+        notify_scan_complete: true,
+        notify_clean_complete: true,
+        notify_clean_failure: true,
+        notify_low_disk_space: true,
+        scan_reminder_interval: "weekly",
+        cpu_thread_limit: 0,
+        default_categories: [
+          "system_caches",
+          "application_logs",
+          "developer_caches",
+          "browser_caches",
+          "mail_downloads",
+        ],
+        developer_workspaces: [],
+      };
+    }
+    return invoke<AppPreferences>("get_preferences");
+  },
+
+  async updatePreferences(preferences: AppPreferences): Promise<AppPreferences> {
+    if (!isTauriEnvironment()) {
+      return { ...preferences, move_to_trash_only: true };
+    }
+    return invoke<AppPreferences>("update_preferences", { preferences });
+  },
+
+  async getAllExclusions(): Promise<ExclusionDescriptor[]> {
+    if (!isTauriEnvironment()) {
+      return [
+        {
+          id: null,
+          path: "/System",
+          category: "SIP System Files",
+          reason: "macOS System Integrity Protection root filesystem",
+          is_mandatory: true,
+          source: "system",
+          added_at: "Permanent",
+        },
+        {
+          id: null,
+          path: "/Library/Keychains",
+          category: "System Keychains",
+          reason: "System-wide certificate stores and security roots",
+          is_mandatory: true,
+          source: "system",
+          added_at: "Permanent",
+        },
+        {
+          id: null,
+          path: "/Users/user/Documents",
+          category: "User Documents",
+          reason: "Personal user work documents and project files",
+          is_mandatory: true,
+          source: "user_identity",
+          added_at: "Permanent",
+        },
+        {
+          id: 1,
+          path: "/Users/user/Code/critical-project",
+          category: "Custom Exclusion",
+          reason: "Active client repository",
+          is_mandatory: false,
+          source: "custom",
+          added_at: new Date(Date.now() - 86400000 * 5).toISOString(),
+        },
+      ];
+    }
+    return invoke<ExclusionDescriptor[]>("get_all_exclusions");
+  },
+
+  async addCustomExclusion(path: string, reason: string): Promise<ExclusionDescriptor> {
+    if (!isTauriEnvironment()) {
+      return {
+        id: Date.now(),
+        path,
+        category: "Custom Exclusion",
+        reason: reason || "User protected directory",
+        is_mandatory: false,
+        source: "custom",
+        added_at: new Date().toISOString(),
+      };
+    }
+    return invoke<ExclusionDescriptor>("add_custom_exclusion", { path, reason });
+  },
+
+  async removeCustomExclusion(path: string): Promise<boolean> {
+    if (!isTauriEnvironment()) {
+      return true;
+    }
+    return invoke<boolean>("remove_custom_exclusion", { path });
+  },
+
+  async queryCleanupHistory(request: HistoryQueryRequest): Promise<HistoryQueryResponse> {
+    if (!isTauriEnvironment()) {
+      return {
+        items: [
+          {
+            id: 101,
+            timestamp: new Date(Date.now() - 3600000 * 4).toISOString(),
+            category: "System Cache",
+            cleanup_source: "Deep Clean",
+            is_dry_run: false,
+            bytes_moved_to_trash: 4500000000,
+            estimated_reclaimable_bytes: 4500000000,
+            verified_host_disk_freed: null,
+            items_deleted: 142,
+            items_skipped: 3,
+            items_failed: 0,
+            method: "trash",
+            status: "success",
+            details_json: "{}",
+            error_summary: null,
+          },
+          {
+            id: 100,
+            timestamp: new Date(Date.now() - 86400000 * 2).toISOString(),
+            category: "Developer",
+            cleanup_source: "Developer Spaces",
+            is_dry_run: false,
+            bytes_moved_to_trash: 12800000000,
+            estimated_reclaimable_bytes: 12800000000,
+            verified_host_disk_freed: null,
+            items_deleted: 4,
+            items_skipped: 0,
+            items_failed: 0,
+            method: "trash",
+            status: "success",
+            details_json: "{}",
+            error_summary: null,
+          },
+          {
+            id: 99,
+            timestamp: new Date(Date.now() - 86400000 * 3).toISOString(),
+            category: "Docker",
+            cleanup_source: "Docker Studio",
+            is_dry_run: false,
+            bytes_moved_to_trash: 0,
+            estimated_reclaimable_bytes: 3500000000,
+            verified_host_disk_freed: null,
+            items_deleted: 6,
+            items_skipped: 0,
+            items_failed: 0,
+            method: "docker",
+            status: "success",
+            details_json: "{}",
+            error_summary: null,
+          },
+        ],
+        total_count: 3,
+        total_pages: 1,
+        current_page: 1,
+        total_bytes_moved_to_trash: 17300000000,
+        total_items_deleted: 152,
+      };
+    }
+    return invoke<HistoryQueryResponse>("query_cleanup_history", { request });
+  },
+
+  async getCleanupAnalytics(): Promise<CleanupAnalyticsSummary> {
+    if (!isTauriEnvironment()) {
+      return {
+        total_operations: 14,
+        total_files_moved_to_trash: 382,
+        total_bytes_moved_to_trash: 24500000000,
+        total_dry_run_operations: 4,
+        developer_bytes_moved: 12800000000,
+        docker_bytes_reclaimed: 7500000000,
+        storage_by_category: [
+          { category: "System Cache", bytes: 6500000000, items: 210 },
+          { category: "Developer", bytes: 12800000000, items: 84 },
+          { category: "Docker", bytes: 7500000000, items: 12 },
+          { category: "Applications", bytes: 3200000000, items: 4 },
+          { category: "Duplicates", bytes: 2000000000, items: 72 },
+        ],
+        daily_trends: [
+          { date: "2026-10-14", bytes_moved_to_trash: 3200000000, operations: 2 },
+          { date: "2026-10-15", bytes_moved_to_trash: 5100000000, operations: 1 },
+          { date: "2026-10-16", bytes_moved_to_trash: 1400000000, operations: 3 },
+          { date: "2026-10-17", bytes_moved_to_trash: 8500000000, operations: 4 },
+          { date: "2026-10-18", bytes_moved_to_trash: 6300000000, operations: 4 },
+        ],
+      };
+    }
+    return invoke<CleanupAnalyticsSummary>("get_cleanup_analytics");
+  },
+
+  async checkDatabaseIntegrity(): Promise<DatabaseHealthReport> {
+    if (!isTauriEnvironment()) {
+      return {
+        is_healthy: true,
+        integrity_status: "ok",
+        schema_version: 2,
+        database_size_bytes: 524288,
+        total_cleanup_records: 14,
+        total_scan_records: 8,
+        total_exclusions: 5,
+      };
+    }
+    return invoke<DatabaseHealthReport>("check_database_integrity");
+  },
+
+  async pruneHistoryByRetention(retentionDays: number): Promise<number> {
+    if (!isTauriEnvironment()) return 0;
+    return invoke<number>("prune_history_by_retention", { retentionDays });
+  },
+
+  async clearCleanupHistory(confirmed: boolean): Promise<void> {
+    if (!isTauriEnvironment()) return;
+    return invoke<void>("clear_cleanup_history", { confirmed });
+  },
+
+  async clearScanHistory(confirmed: boolean): Promise<void> {
+    if (!isTauriEnvironment()) return;
+    return invoke<void>("clear_scan_history", { confirmed });
+  },
+
+  async sendTestNotification(): Promise<void> {
+    if (!isTauriEnvironment()) {
+      console.log("[Preview Mode] Notification: Preferences verified.");
+      return;
+    }
+    return invoke<void>("send_test_notification");
   },
 };
 

@@ -23,6 +23,12 @@ import type {
   DeveloperScanResult,
   DockerScanResult,
   DockerCleanResult,
+  AppPreferences,
+  ExclusionDescriptor,
+  HistoryQueryRequest,
+  HistoryQueryResponse,
+  CleanupAnalyticsSummary,
+  DatabaseHealthReport,
 } from "../types";
 
 interface CleanState {
@@ -101,6 +107,19 @@ interface CleanState {
   whitelist: WhitelistEntry[];
   settings: Record<string, string>;
 
+  // Phase 08 Preferences, Exclusions, Advanced History & Analytics
+  preferences: AppPreferences | null;
+  isPreferencesLoading: boolean;
+  allExclusions: ExclusionDescriptor[];
+  isExclusionsLoading: boolean;
+  historyQueryResponse: HistoryQueryResponse | null;
+  isHistoryLoading: boolean;
+  historyFilter: HistoryQueryRequest;
+  cleanupAnalytics: CleanupAnalyticsSummary | null;
+  isAnalyticsLoading: boolean;
+  databaseHealth: DatabaseHealthReport | null;
+  isHealthChecking: boolean;
+
   // Actions
   setActiveTab: (tab: NavigationTab) => void;
   fetchSystemSummary: () => Promise<void>;
@@ -173,6 +192,21 @@ interface CleanState {
   addWhitelist: (path: string, reason: string) => Promise<void>;
   removeWhitelist: (path: string) => Promise<void>;
   cleanSpecificPaths: (paths: string[]) => Promise<CleanResult | null>;
+
+  // Phase 08 Actions
+  fetchPreferences: () => Promise<void>;
+  updatePreferences: (prefs: Partial<AppPreferences>) => Promise<void>;
+  fetchAllExclusions: () => Promise<void>;
+  addCustomExclusion: (path: string, reason: string) => Promise<boolean>;
+  removeCustomExclusion: (path: string) => Promise<boolean>;
+  fetchHistoryQuery: (req?: Partial<HistoryQueryRequest>) => Promise<void>;
+  setHistoryFilter: (filter: Partial<HistoryQueryRequest>) => void;
+  fetchCleanupAnalytics: () => Promise<void>;
+  checkDatabaseHealth: () => Promise<void>;
+  pruneHistory: (days: number) => Promise<number>;
+  clearCleanupHistory: (confirmed: boolean) => Promise<void>;
+  clearScanHistory: (confirmed: boolean) => Promise<void>;
+  sendTestNotification: () => Promise<void>;
 }
 
 export const useCleanStore = create<CleanState>((set, get) => ({
@@ -256,6 +290,27 @@ export const useCleanStore = create<CleanState>((set, get) => ({
   cleanupHistory: [],
   whitelist: [],
   settings: {},
+
+  // Phase 08 Preferences, Exclusions, Advanced History & Analytics
+  preferences: null,
+  isPreferencesLoading: false,
+  allExclusions: [],
+  isExclusionsLoading: false,
+  historyQueryResponse: null,
+  isHistoryLoading: false,
+  historyFilter: {
+    page: 1,
+    page_size: 15,
+    category: "all",
+    dry_run_only: null,
+    search_query: "",
+    sort_by: "id",
+    sort_order: "desc",
+  },
+  cleanupAnalytics: null,
+  isAnalyticsLoading: false,
+  databaseHealth: null,
+  isHealthChecking: false,
 
   setActiveTab: (tab) => set({ activeTab: tab }),
 
@@ -1188,6 +1243,144 @@ export const useCleanStore = create<CleanState>((set, get) => ({
       get().fetchWhitelist();
     } catch (err) {
       console.error("Remove whitelist error:", err);
+    }
+  },
+
+  fetchPreferences: async () => {
+    set({ isPreferencesLoading: true });
+    try {
+      const prefs = await api.getPreferences();
+      set({ preferences: prefs, dryRunMode: prefs.dry_run_default, isPreferencesLoading: false });
+    } catch (err) {
+      console.error("Failed to load preferences:", err);
+      set({ isPreferencesLoading: false });
+    }
+  },
+
+  updatePreferences: async (partial) => {
+    const current = get().preferences;
+    if (!current) return;
+    try {
+      const updated = await api.updatePreferences({ ...current, ...partial, move_to_trash_only: true });
+      set({ preferences: updated });
+    } catch (err) {
+      console.error("Failed to update preferences:", err);
+    }
+  },
+
+  fetchAllExclusions: async () => {
+    set({ isExclusionsLoading: true });
+    try {
+      const list = await api.getAllExclusions();
+      set({ allExclusions: list, isExclusionsLoading: false });
+    } catch (err) {
+      console.error("Failed to load exclusions:", err);
+      set({ isExclusionsLoading: false });
+    }
+  },
+
+  addCustomExclusion: async (path, reason) => {
+    try {
+      await api.addCustomExclusion(path, reason);
+      await get().fetchAllExclusions();
+      return true;
+    } catch (err) {
+      console.error("Failed to add custom exclusion:", err);
+      return false;
+    }
+  },
+
+  removeCustomExclusion: async (path) => {
+    try {
+      const ok = await api.removeCustomExclusion(path);
+      if (ok) {
+        await get().fetchAllExclusions();
+      }
+      return ok;
+    } catch (err) {
+      console.error("Failed to remove custom exclusion:", err);
+      return false;
+    }
+  },
+
+  fetchHistoryQuery: async (req) => {
+    const filter = { ...get().historyFilter, ...req };
+    set({ historyFilter: filter, isHistoryLoading: true });
+    try {
+      const res = await api.queryCleanupHistory(filter);
+      set({ historyQueryResponse: res, isHistoryLoading: false });
+    } catch (err) {
+      console.error("Failed to query cleanup history:", err);
+      set({ isHistoryLoading: false });
+    }
+  },
+
+  setHistoryFilter: (partial) => {
+    const next = { ...get().historyFilter, ...partial };
+    set({ historyFilter: next });
+    get().fetchHistoryQuery(next);
+  },
+
+  fetchCleanupAnalytics: async () => {
+    set({ isAnalyticsLoading: true });
+    try {
+      const analytics = await api.getCleanupAnalytics();
+      set({ cleanupAnalytics: analytics, isAnalyticsLoading: false });
+    } catch (err) {
+      console.error("Failed to fetch cleanup analytics:", err);
+      set({ isAnalyticsLoading: false });
+    }
+  },
+
+  checkDatabaseHealth: async () => {
+    set({ isHealthChecking: true });
+    try {
+      const report = await api.checkDatabaseIntegrity();
+      set({ databaseHealth: report, isHealthChecking: false });
+    } catch (err) {
+      console.error("Failed to check database health:", err);
+      set({ isHealthChecking: false });
+    }
+  },
+
+  pruneHistory: async (days) => {
+    try {
+      const count = await api.pruneHistoryByRetention(days);
+      get().fetchHistoryQuery();
+      get().fetchCleanupAnalytics();
+      get().checkDatabaseHealth();
+      return count;
+    } catch (err) {
+      console.error("Failed to prune history:", err);
+      return 0;
+    }
+  },
+
+  clearCleanupHistory: async (confirmed) => {
+    try {
+      await api.clearCleanupHistory(confirmed);
+      get().fetchHistoryQuery();
+      get().fetchCleanupAnalytics();
+      get().checkDatabaseHealth();
+    } catch (err) {
+      console.error("Failed to clear cleanup history:", err);
+    }
+  },
+
+  clearScanHistory: async (confirmed) => {
+    try {
+      await api.clearScanHistory(confirmed);
+      get().checkDatabaseHealth();
+    } catch (err) {
+      console.error("Failed to clear scan history:", err);
+    }
+  },
+
+  sendTestNotification: async () => {
+    try {
+      await api.sendTestNotification();
+    } catch (err) {
+      console.error("Failed to send test notification:", err);
     }
   },
 }));
