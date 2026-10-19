@@ -138,6 +138,7 @@ interface CleanState {
   // Duplicates State
   duplicatesResult: DuplicateScanResult | null;
   isDuplicateScanning: boolean;
+  duplicateScanError: string | null;
   duplicateProgress: DuplicateScanProgress | null;
   duplicateTargetDir: string;
   duplicateMinSize: number;
@@ -232,7 +233,8 @@ interface CleanState {
   openInFinder: (path: string) => Promise<void>;
   setDuplicateTargetDir: (dir: string) => void;
   setDuplicateMinSize: (bytes: number) => void;
-  scanDuplicates: (targetPath?: string, minSizeBytes?: number) => Promise<void>;
+  scanDuplicates: (targetPath?: string, minSizeBytes?: number) => Promise<boolean>;
+  pickAndScanDuplicateFolder: () => Promise<void>;
   cancelDuplicateScan: () => Promise<void>;
   toggleDuplicateFile: (groupHash: string, path: string) => void;
   autoSelectDuplicates: (strategy: "keep_oldest" | "keep_newest" | "deselect_all") => void;
@@ -356,6 +358,7 @@ export const useCleanStore = create<CleanState>((set, get) => ({
 
   duplicatesResult: null,
   isDuplicateScanning: false,
+  duplicateScanError: null,
   duplicateProgress: null,
   duplicateTargetDir: "",
   duplicateMinSize: 1024 * 1024,
@@ -876,14 +879,14 @@ export const useCleanStore = create<CleanState>((set, get) => ({
     }
   },
 
-  setDuplicateTargetDir: (dir: string) => set({ duplicateTargetDir: dir }),
+  setDuplicateTargetDir: (dir: string) => set({ duplicateTargetDir: dir, duplicateScanError: null }),
   setDuplicateMinSize: (bytes: number) => set({ duplicateMinSize: bytes }),
 
   scanDuplicates: async (targetPath, minSizeBytes) => {
-    const dir = targetPath ?? get().duplicateTargetDir;
+    const dir = targetPath !== undefined ? targetPath : get().duplicateTargetDir;
     const minSize = minSizeBytes ?? get().duplicateMinSize;
 
-    set({ isDuplicateScanning: true, duplicateProgress: null });
+    set({ isDuplicateScanning: true, duplicateProgress: null, duplicateScanError: null });
 
     let unlisten: (() => void) | undefined;
     try {
@@ -892,14 +895,46 @@ export const useCleanStore = create<CleanState>((set, get) => ({
       });
 
       const res = await api.scanDuplicates(dir || undefined, minSize);
-      set({ duplicatesResult: res, isDuplicateScanning: false, duplicateProgress: null });
-    } catch (err) {
+      set({
+        duplicatesResult: res,
+        isDuplicateScanning: false,
+        duplicateProgress: null,
+        duplicateScanError: null,
+      });
+      return true;
+    } catch (err: any) {
       console.error("Duplicate scan error:", err);
-      set({ isDuplicateScanning: false, duplicateProgress: null });
+      const errorMsg =
+        typeof err === "string"
+          ? err
+          : err?.message || "Failed to complete duplicate scan.";
+      set({
+        isDuplicateScanning: false,
+        duplicateProgress: null,
+        duplicateScanError: errorMsg,
+      });
+      return false;
     } finally {
       if (unlisten) {
         unlisten();
       }
+    }
+  },
+
+  pickAndScanDuplicateFolder: async () => {
+    try {
+      const selected = await api.pickFolder("Select folder to scan for duplicate files");
+      if (selected) {
+        set({ duplicateTargetDir: selected, duplicateScanError: null });
+        await get().scanDuplicates(selected);
+      }
+    } catch (err: any) {
+      console.error("Failed to pick folder:", err);
+      const errorMsg =
+        typeof err === "string"
+          ? err
+          : err?.message || "Failed to open folder picker.";
+      set({ duplicateScanError: errorMsg });
     }
   },
 

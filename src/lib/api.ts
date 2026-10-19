@@ -327,6 +327,11 @@ export const api = {
     return invoke<boolean>("cancel_duplicate_scan");
   },
 
+  async pickFolder(prompt?: string): Promise<string | null> {
+    if (!isTauriEnvironment()) return null;
+    return invoke<string | null>("pick_folder", { prompt });
+  },
+
   async cleanDuplicates(request: CleanDuplicatesRequest): Promise<CleanResult> {
     if (!isTauriEnvironment()) {
       await new Promise((r) => setTimeout(r, 600));

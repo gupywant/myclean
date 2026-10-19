@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { useFluxStore } from "../../store/useFluxStore";
 import { formatBytes, formatDate, formatDuration, truncatePath } from "../../lib/utils";
 import { motion, AnimatePresence } from "motion/react";
@@ -22,6 +22,8 @@ import {
   StopCircle,
   Check,
   X,
+  WarningCircle,
+  FolderSimplePlus,
 } from "@phosphor-icons/react";
 
 type SortOption = "reclaimable" | "count" | "size" | "name";
@@ -30,12 +32,14 @@ export const DuplicatesView: React.FC = () => {
   const {
     duplicatesResult,
     isDuplicateScanning,
+    duplicateScanError,
     duplicateProgress,
     duplicateTargetDir,
     duplicateMinSize,
     setDuplicateTargetDir,
     setDuplicateMinSize,
     scanDuplicates,
+    pickAndScanDuplicateFolder,
     cancelDuplicateScan,
     toggleDuplicateFile,
     autoSelectDuplicates,
@@ -120,6 +124,13 @@ export const DuplicatesView: React.FC = () => {
     }
   });
 
+  // Auto-scan on mount if no previous scan has been run
+  useEffect(() => {
+    if (!duplicatesResult && !isDuplicateScanning) {
+      scanDuplicates(duplicateTargetDir || undefined, duplicateMinSize);
+    }
+  }, []);
+
   const handleStartScan = (pathOverride?: string) => {
     const path = pathOverride !== undefined ? pathOverride : duplicateTargetDir;
     scanDuplicates(path || undefined, duplicateMinSize);
@@ -127,7 +138,19 @@ export const DuplicatesView: React.FC = () => {
 
   const handleSelectPreset = (scopeName: string) => {
     setShowCustomPath(false);
-    setDuplicateTargetDir(scopeName === "Downloads" ? "" : scopeName);
+    const target = scopeName === "Downloads" ? "" : scopeName;
+    setDuplicateTargetDir(target);
+    scanDuplicates(target || undefined, duplicateMinSize);
+  };
+
+  const handleSelectMinSize = (bytes: number) => {
+    setDuplicateMinSize(bytes);
+    scanDuplicates(duplicateTargetDir || undefined, bytes);
+  };
+
+  const handlePickFolder = async () => {
+    setShowCustomPath(false);
+    await pickAndScanDuplicateFolder();
   };
 
   // Helper to check if unchecking a file would violate original preservation
@@ -231,42 +254,46 @@ export const DuplicatesView: React.FC = () => {
         {/* Scope and Filter Pills */}
         <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
           {/* Target Directory Scope */}
-          <div className="flex items-center space-x-2 text-xs">
-            <span className="text-slate-400 flex items-center space-x-1">
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="text-slate-400 flex items-center space-x-1 shrink-0">
               <FolderOpen size={14} />
               <span>Scope:</span>
             </span>
-            <div className="flex items-center space-x-1.5 p-1 rounded-xl bg-black/40 border border-white/[0.06]">
+            <div className="flex flex-wrap items-center gap-1.5 p-1 rounded-xl bg-black/40 border border-white/[0.06]">
+              {[
+                { label: "Downloads", key: "Downloads" },
+                { label: "Documents", key: "Documents" },
+                { label: "Desktop", key: "Desktop" },
+                { label: "Pictures", key: "Pictures" },
+                { label: "Home (~)", key: "~" },
+              ].map((scope) => {
+                const isSelected =
+                  (scope.key === "Downloads" && duplicateTargetDir === "") ||
+                  duplicateTargetDir === scope.key;
+                return (
+                  <button
+                    key={scope.key}
+                    onClick={() => handleSelectPreset(scope.key)}
+                    className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
+                      isSelected && !showCustomPath
+                        ? "bg-indigo-600 text-white shadow"
+                        : "text-slate-400 hover:text-white"
+                    }`}
+                  >
+                    {scope.label}
+                  </button>
+                );
+              })}
+
               <button
-                onClick={() => handleSelectPreset("Downloads")}
-                className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
-                  duplicateTargetDir === "" && !showCustomPath
-                    ? "bg-indigo-600 text-white shadow"
-                    : "text-slate-400 hover:text-white"
-                }`}
+                onClick={handlePickFolder}
+                className="px-3 py-1 rounded-lg text-xs font-medium text-slate-300 hover:text-white hover:bg-white/[0.06] transition-all flex items-center space-x-1"
+                title="Choose a specific folder from native macOS dialog"
               >
-                Downloads (Default)
+                <FolderSimplePlus size={13} className="text-indigo-400" />
+                <span>Browse Folder...</span>
               </button>
-              <button
-                onClick={() => handleSelectPreset("Documents")}
-                className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
-                  duplicateTargetDir === "Documents" && !showCustomPath
-                    ? "bg-indigo-600 text-white shadow"
-                    : "text-slate-400 hover:text-white"
-                }`}
-              >
-                Documents
-              </button>
-              <button
-                onClick={() => handleSelectPreset("Desktop")}
-                className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
-                  duplicateTargetDir === "Desktop" && !showCustomPath
-                    ? "bg-indigo-600 text-white shadow"
-                    : "text-slate-400 hover:text-white"
-                }`}
-              >
-                Desktop
-              </button>
+
               <button
                 onClick={() => setShowCustomPath(!showCustomPath)}
                 className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
@@ -275,27 +302,46 @@ export const DuplicatesView: React.FC = () => {
                     : "text-slate-400 hover:text-white"
                 }`}
               >
-                Custom Path...
+                Manual Path...
               </button>
             </div>
+
+            {/* Custom Path Active Tag */}
+            {duplicateTargetDir &&
+              !["", "Downloads", "Documents", "Desktop", "Pictures", "Movies", "~"].includes(
+                duplicateTargetDir
+              ) && (
+                <div className="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-indigo-500/15 border border-indigo-500/25 text-indigo-300 text-xs font-mono">
+                  <FolderOpen size={13} className="text-indigo-400" />
+                  <span>{truncatePath(duplicateTargetDir, 26)}</span>
+                  <button
+                    onClick={() => handleSelectPreset("Downloads")}
+                    className="hover:text-white text-slate-400 ml-0.5"
+                    title="Reset to Downloads"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              )}
           </div>
 
           {/* Minimum Size Threshold */}
           <div className="flex items-center space-x-2 text-xs">
-            <span className="text-slate-400 flex items-center space-x-1">
+            <span className="text-slate-400 flex items-center space-x-1 shrink-0">
               <Funnel size={14} />
               <span>Min Size:</span>
             </span>
             <div className="flex items-center space-x-1 p-1 rounded-xl bg-black/40 border border-white/[0.06]">
               {[
                 { label: "All (>1KB)", bytes: 1024 },
+                { label: "100 KB", bytes: 100 * 1024 },
                 { label: "1 MB", bytes: 1024 * 1024 },
                 { label: "10 MB", bytes: 10 * 1024 * 1024 },
                 { label: "100 MB", bytes: 100 * 1024 * 1024 },
               ].map((opt) => (
                 <button
                   key={opt.bytes}
-                  onClick={() => setDuplicateMinSize(opt.bytes)}
+                  onClick={() => handleSelectMinSize(opt.bytes)}
                   className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all ${
                     duplicateMinSize === opt.bytes
                       ? "bg-indigo-600 text-white shadow"
@@ -317,6 +363,12 @@ export const DuplicatesView: React.FC = () => {
               placeholder="/Users/username/Developer or path to folder..."
               value={customPathInput}
               onChange={(e) => setCustomPathInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && customPathInput.trim()) {
+                  setDuplicateTargetDir(customPathInput.trim());
+                  handleStartScan(customPathInput.trim());
+                }
+              }}
               className="flex-1 px-3 py-1.5 rounded-lg bg-black/50 border border-white/[0.08] text-xs font-mono text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
             />
             <button
@@ -329,6 +381,25 @@ export const DuplicatesView: React.FC = () => {
               className="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium transition-colors"
             >
               Scan Path
+            </button>
+          </div>
+        )}
+
+        {/* Scan Error Banner */}
+        {duplicateScanError && (
+          <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/25 flex items-start justify-between space-x-3 text-rose-300 text-xs animate-in fade-in duration-150">
+            <div className="flex items-start space-x-2">
+              <WarningCircle size={16} className="text-rose-400 shrink-0 mt-0.5" weight="fill" />
+              <div>
+                <p className="font-semibold text-rose-200">Scan Notice</p>
+                <p className="text-[11px] text-rose-300/90 mt-0.5">{duplicateScanError}</p>
+              </div>
+            </div>
+            <button
+              onClick={() => handleSelectPreset("Downloads")}
+              className="px-2.5 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 text-xs font-medium border border-rose-500/30 transition-colors shrink-0"
+            >
+              Reset to Downloads
             </button>
           </div>
         )}
@@ -567,20 +638,41 @@ export const DuplicatesView: React.FC = () => {
             {/* Duplicate Groups List */}
             <div className="flex-1 overflow-y-auto p-6 space-y-4">
               {filteredAndSortedGroups.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-center space-y-3 p-12">
-                  <CopySimple size={36} className="text-slate-600" />
-                  <div className="space-y-1">
+                <div className="h-full flex flex-col items-center justify-center text-center space-y-4 p-12">
+                  <div className="w-14 h-14 rounded-2xl bg-white/[0.03] border border-white/[0.08] flex items-center justify-center text-slate-500 shadow-inner">
+                    <CopySimple size={30} weight="duotone" />
+                  </div>
+                  <div className="space-y-1.5 max-w-sm">
                     <h3 className="text-sm font-semibold text-white">
                       {searchQuery
                         ? "No duplicate groups matching query"
                         : "No Duplicate Clones Found"}
                     </h3>
-                    <p className="text-xs text-slate-400 max-w-sm">
+                    <p className="text-xs text-slate-400">
                       {searchQuery
                         ? "Try clearing the search filter to display all duplicate groups."
-                        : "No exact duplicate files were detected in the selected scope."}
+                        : `No byte-exact duplicate files were detected in ${
+                            duplicateTargetDir || "Downloads"
+                          } above the selected size threshold.`}
                     </p>
                   </div>
+                  {!searchQuery && (
+                    <div className="flex items-center space-x-2 pt-1">
+                      <button
+                        onClick={() => handleSelectPreset("Documents")}
+                        className="px-3 py-1.5 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] text-slate-300 text-xs font-medium border border-white/[0.06] transition-colors"
+                      >
+                        Scan Documents
+                      </button>
+                      <button
+                        onClick={handlePickFolder}
+                        className="px-3 py-1.5 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 text-xs font-medium border border-indigo-500/30 transition-colors flex items-center space-x-1"
+                      >
+                        <FolderSimplePlus size={13} />
+                        <span>Browse Other Folder...</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
               ) : (
                 filteredAndSortedGroups.map((group) => {

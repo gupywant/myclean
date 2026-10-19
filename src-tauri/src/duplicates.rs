@@ -188,8 +188,8 @@ impl DuplicateScanner {
             };
         }
 
-        // System protection and mandatory exclusion guardrails
-        if SafetyGuard::is_system_protected(root) || SafetyGuard::is_mandatory_exclusion(root) {
+        // System protection and user privacy guardrails (never scan SIP or private identity directories)
+        if SafetyGuard::is_system_protected(root) || SafetyGuard::is_user_privacy_protected(root) {
             return DuplicateScanResult {
                 duration_ms: 0,
                 total_duplicate_groups: 0,
@@ -199,7 +199,7 @@ impl DuplicateScanner {
                 groups: Vec::new(),
                 skipped_paths: vec![SkippedPath {
                     path: root.to_string_lossy().to_string(),
-                    reason: "Target directory is in a system-protected or excluded scope".into(),
+                    reason: "Target directory is in a system-protected or private scope".into(),
                 }],
                 was_cancelled: false,
             };
@@ -286,8 +286,10 @@ impl DuplicateScanner {
             }
 
             let path = entry.path();
-            if SafetyGuard::is_mandatory_exclusion(path)
+            if SafetyGuard::is_system_protected(path)
                 || SafetyGuard::is_database_or_persistent_state(path)
+                || SafetyGuard::is_user_privacy_protected(path)
+                || path.components().any(|c| c.as_os_str() == ".git")
             {
                 continue;
             }
@@ -673,8 +675,8 @@ impl DuplicateScanner {
                     continue;
                 }
 
-                // Safety validation: must pass SafetyGuard
-                let canonical = match SafetyGuard::validate_for_cleaning(&target_path) {
+                // Safety validation: must pass duplicate cleaning safety rules
+                let canonical = match SafetyGuard::validate_duplicate_for_cleaning(&target_path) {
                     Ok(c) => c,
                     Err(e) => {
                         errors.push(CleanErrorItem {

@@ -58,6 +58,7 @@ pub fn run() {
             commands::cancel_clean,
             commands::check_active_applications,
             commands::scan_duplicates,
+            commands::pick_folder,
             commands::cancel_duplicate_scan,
             commands::clean_duplicates,
             commands::cancel_duplicate_clean,

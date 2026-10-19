@@ -505,11 +505,31 @@
     - Full Light Theme styling: Crisp `#F4F6FB` canvas, `#FFFFFF` card surfaces, `#F1F4F9` sub-surfaces, `#0F172A` high-contrast typography, and light frosted glass.
     - Dynamic Accent Colors: Electric Violet (`#8B5CF6`), Cyan Pulse (`#06B6D4`), and Hyper Indigo (`#6366F1`) seamlessly tint primary buttons, active sidebar items, badges, and glow borders.
     - Animation Intensity: Reduced motion stops heavy radar sweeps and ping rings; "Off" eliminates all animations and transitions.
-  - Integrated optimistic updates in `useCleanStore.ts` for instantaneous (0ms) visual responsiveness upon clicking theme, accent, or animation controls.
+- [x] **Advanced Duplicate Finder Fixes & Native Folder Integration:**
+  - Diagnosed why Duplicate Finder was previously not working:
+    1. **Relative Path Resolution Failure:** `commands.rs` took preset strings like `"Documents"` and checked `PathBuf::from("Documents").is_dir()`, which resolved relative to the app process CWD and failed immediately with `"Duplicate scan target is not a valid directory: Documents"`.
+    2. **Safety Blacklist Blocked User Documents:** In `safety.rs`, `USER_DOCUMENT_DIRECTORIES` (`Documents`, `Desktop`, `Pictures`, `Music`, `Movies`) were classified under `is_mandatory_exclusion`. This caused `WalkDir` to skip every file in user document folders and threw safety violations during cleaning, despite AGENTS.md explicitly permitting duplicate scans on user folders when targeted.
+    3. **No Auto-Scan or Native macOS Folder Chooser:** `DuplicatesView.tsx` had no auto-scan on mount, required typing paths by hand, and silently swallowed scan errors without alerting the user.
+  - **Backend Systems Hardening:**
+    - Added `SafetyGuard::is_user_privacy_protected` guarding `.ssh`, `.gnupg`, `Keychains`, `Mail`, `Messages`, and active `.git` repositories while permitting user document deduplication.
+    - Added `SafetyGuard::validate_duplicate_for_cleaning` allowing safe Cocoa trashing within user document folders while preserving system SIP locations and originals.
+    - Updated `scan_duplicates` in `commands.rs` to dynamically resolve presets (`"downloads"`, `"documents"`, `"desktop"`, `"pictures"`, `"movies"`, `"home"`, `"~"`), perform tilde expansion, and canonicalize safely.
+    - Added native Cocoa folder chooser `pick_folder` command using macOS AppleScript dialog (`choose folder`).
+  - **Frontend Polish & Reactive Experience:**
+    - Exposed `pickFolder(prompt?: string)` in `api.ts`.
+    - Added `duplicateScanError`, `pickAndScanDuplicateFolder`, and error capture in `useCleanStore.ts`.
+    - Added auto-scan on initial mount in `DuplicatesView.tsx` defaulting to Downloads.
+    - Added Scope buttons with preset targets: Downloads, Documents, Desktop, Pictures, Home (~).
+    - Added "Browse Folder..." button invoking native macOS folder picker dialog.
+    - Added dynamic size threshold pills: `> 1 KB`, `> 100 KB`, `> 1 MB`, `> 10 MB`, `> 100 MB` with instant rescan on click.
+    - Added visual Notice Banner for scan rejections with one-click "Reset to Downloads" recovery.
+    - Enhanced Empty State with quick shortcuts to scan Documents or browse another folder.
+    - All 106 unit & integration tests passing; built and deployed to `/Applications/myclean.app`.
 
 ### Phase 12: Homebrew Tap & Update Checker (Planned / Next)
 - [ ] Create Homebrew Tap (`gupywant/homebrew-tap`) and Cask formula (`Casks/myclean.rb`).
 - [ ] Implement opt-in GitHub Release update notifier with semantic version comparisons.
+
 
 
 

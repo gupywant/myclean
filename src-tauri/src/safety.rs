@@ -351,6 +351,36 @@ impl SafetyGuard {
         false
     }
 
+    /// User privacy directories that contain identity, keys, authentication, or personal communication data.
+    /// NEVER touched by automated scanners or duplicate finder.
+    pub fn is_user_privacy_protected<P: AsRef<Path>>(path: P) -> bool {
+        let p = path.as_ref();
+        let path_str = match p.canonicalize() {
+            Ok(c) => c.to_string_lossy().to_string(),
+            Err(_) => p.to_string_lossy().to_string(),
+        };
+
+        if let Some(home) = dirs::home_dir() {
+            let home_str = home.to_string_lossy();
+            if !path_str.starts_with(home_str.as_ref()) {
+                return false;
+            }
+
+            let relative = match Path::new(&path_str).strip_prefix(&home) {
+                Ok(r) => r.to_string_lossy().to_string(),
+                Err(_) => return false,
+            };
+
+            for protected in USER_PROTECTED_SUBPATHS {
+                if relative == *protected || relative.starts_with(&format!("{}/", protected)) {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
     /// Evaluates whether a path is subject to mandatory exclusions from automated scanning or cleaning.
     /// Excludes: SIP, Keychains, Mail, Messages, iCloud Drive, Docker VM disks, Time Machine,
     /// .git directories, broad /private/var/folders, and unrestricted Containers.
@@ -697,6 +727,88 @@ impl SafetyGuard {
         }
 
         // 8. Active application protection check (only if not running a unit test)
+        #[cfg(not(test))]
+        if let Some(app_name) = Self::detect_running_application(&canonical) {
+            return Err(SafetyError::ActiveApplicationRunning(app_name));
+        }
+
+        Ok(canonical)
+    }
+
+    /// Verifies that a duplicate path is safe for cleaning in the Duplicate Finder.
+    /// Unlike generic automated cleanup, duplicate cleaning allows targeting user document directories
+    /// (e.g. ~/Documents, ~/Desktop, ~/Pictures) that were explicitly selected by the user for deduplication,
+    /// while strictly maintaining SIP protection, privacy stores protection, database protection, and git safety.
+    pub fn validate_duplicate_for_cleaning<P: AsRef<Path>>(path: P) -> Result<PathBuf, SafetyError> {
+        let p = path.as_ref();
+        let path_str = p.to_string_lossy().to_string();
+
+        Self::check_path_traversal(p)?;
+
+        if !p.exists() {
+            return Err(SafetyError::NotFound(path_str));
+        }
+
+        let canonical = p.canonicalize().map_err(SafetyError::Io)?;
+        let canonical_str = canonical.to_string_lossy().to_string();
+
+        // 1. Symlink inspection
+        if p.is_symlink() {
+            let target = std::fs::read_link(p)?;
+            if Self::is_system_protected(&target) {
+                return Err(SafetyError::SystemProtected(
+                    target.to_string_lossy().to_string(),
+                ));
+            }
+            if Self::is_user_privacy_protected(&target) {
+                return Err(SafetyError::UserProtected(
+                    target.to_string_lossy().to_string(),
+                ));
+            }
+        }
+
+        // 2. Database & persistent state protection
+        if Self::is_database_or_persistent_state(p)
+            || Self::is_database_or_persistent_state(&canonical)
+        {
+            return Err(SafetyError::DatabaseOrPersistentState(canonical_str));
+        }
+
+        // 3. Git tree protection: never touch active git repositories
+        if canonical_str.contains("/.git/objects")
+            || canonical_str.contains("/.git/refs")
+            || canonical_str.contains("/.git/HEAD")
+        {
+            return Err(SafetyError::UserProtected(
+                "Protected active Git repository data".into(),
+            ));
+        }
+
+        // 4. System protected check (SIP)
+        if Self::is_system_protected(p) || Self::is_system_protected(&canonical) {
+            return Err(SafetyError::SystemProtected(canonical_str));
+        }
+
+        // 5. User privacy protected check (Keychains, Mail, Messages, .ssh, .gnupg)
+        if Self::is_user_privacy_protected(p) || Self::is_user_privacy_protected(&canonical) {
+            return Err(SafetyError::UserProtected(canonical_str));
+        }
+
+        // 6. Prevent deleting root or user home directory
+        if let Some(home) = dirs::home_dir() {
+            if canonical == home || p == home {
+                return Err(SafetyError::UserProtected(
+                    "Cannot delete user home directory".into(),
+                ));
+            }
+        }
+
+        if canonical == Path::new("/") || p == Path::new("/") {
+            return Err(SafetyError::SystemProtected(
+                "Cannot delete root directory".into(),
+            ));
+        }
+
         #[cfg(not(test))]
         if let Some(app_name) = Self::detect_running_application(&canonical) {
             return Err(SafetyError::ActiveApplicationRunning(app_name));

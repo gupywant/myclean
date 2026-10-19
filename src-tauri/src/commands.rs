@@ -178,29 +178,77 @@ pub async fn scan_duplicates(
 
     let target = if let Some(p_str) = target_path {
         let trimmed = p_str.trim();
-        if trimmed.is_empty() || trimmed.contains('\0') {
-            return Err("Duplicate scan path cannot be empty or contain null bytes".into());
+        match trimmed.to_lowercase().as_str() {
+            "" | "downloads" => dirs::download_dir().unwrap_or_else(|| {
+                dirs::home_dir()
+                    .map(|h| h.join("Downloads"))
+                    .unwrap_or_else(|| PathBuf::from("/"))
+            }),
+            "documents" => dirs::document_dir().unwrap_or_else(|| {
+                dirs::home_dir()
+                    .map(|h| h.join("Documents"))
+                    .unwrap_or_else(|| PathBuf::from("/"))
+            }),
+            "desktop" => dirs::desktop_dir().unwrap_or_else(|| {
+                dirs::home_dir()
+                    .map(|h| h.join("Desktop"))
+                    .unwrap_or_else(|| PathBuf::from("/"))
+            }),
+            "pictures" => dirs::picture_dir().unwrap_or_else(|| {
+                dirs::home_dir()
+                    .map(|h| h.join("Pictures"))
+                    .unwrap_or_else(|| PathBuf::from("/"))
+            }),
+            "movies" => dirs::video_dir().unwrap_or_else(|| {
+                dirs::home_dir()
+                    .map(|h| h.join("Movies"))
+                    .unwrap_or_else(|| PathBuf::from("/"))
+            }),
+            "music" => dirs::audio_dir().unwrap_or_else(|| {
+                dirs::home_dir()
+                    .map(|h| h.join("Music"))
+                    .unwrap_or_else(|| PathBuf::from("/"))
+            }),
+            "home" | "~" => dirs::home_dir().unwrap_or_else(|| PathBuf::from("/")),
+            _ => {
+                if trimmed.contains('\0') {
+                    return Err("Duplicate scan path cannot contain null bytes".into());
+                }
+                let p = if trimmed.starts_with("~/") {
+                    if let Some(home) = dirs::home_dir() {
+                        home.join(&trimmed[2..])
+                    } else {
+                        PathBuf::from(trimmed)
+                    }
+                } else {
+                    PathBuf::from(trimmed)
+                };
+                SafetyGuard::check_path_traversal(&p).map_err(|e| e.to_string())?;
+                if !p.exists() || !p.is_dir() {
+                    return Err(format!(
+                        "Duplicate scan target is not a valid directory: {}",
+                        trimmed
+                    ));
+                }
+                let canonical = p.canonicalize().map_err(|e| e.to_string())?;
+                if SafetyGuard::is_system_protected(&canonical) {
+                    return Err(format!(
+                        "Duplicate scan rejected: '{}' is a protected macOS system location.",
+                        canonical.display()
+                    ));
+                }
+                canonical
+            }
         }
-        SafetyGuard::check_path_traversal(trimmed).map_err(|e| e.to_string())?;
-        let p = PathBuf::from(trimmed);
-        if !p.is_dir() {
-            return Err(format!(
-                "Duplicate scan target is not a valid directory: {}",
-                trimmed
-            ));
-        }
-        if SafetyGuard::is_system_protected(&p) {
-            return Err(format!(
-                "Duplicate scan rejected: '{}' is a protected macOS system location.",
-                trimmed
-            ));
-        }
-        p.canonicalize().map_err(|e| e.to_string())?
     } else {
-        dirs::download_dir().unwrap_or_else(|| PathBuf::from("/"))
+        dirs::download_dir().unwrap_or_else(|| {
+            dirs::home_dir()
+                .map(|h| h.join("Downloads"))
+                .unwrap_or_else(|| PathBuf::from("/"))
+        })
     };
 
-    let min_bytes = min_size_bytes.unwrap_or(1024 * 1024); // default 1MB
+    let min_bytes = min_size_bytes.unwrap_or(1024); // default 1KB
 
     tokio::task::spawn_blocking(move || {
         let app_handle = app.clone();
@@ -215,6 +263,39 @@ pub async fn scan_duplicates(
     })
     .await
     .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn pick_folder(prompt: Option<String>) -> Result<Option<String>, String> {
+    tokio::task::spawn_blocking(move || {
+        let msg = prompt.unwrap_or_else(|| "Select folder to scan for duplicates:".into());
+        let script = format!(
+            "POSIX path of (choose folder with prompt \"{}\")",
+            msg.replace('"', "\\\"")
+        );
+        let output = std::process::Command::new("osascript")
+            .arg("-e")
+            .arg(&script)
+            .output();
+
+        match output {
+            Ok(out) => {
+                if out.status.success() {
+                    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                    if s.is_empty() {
+                        Ok(None)
+                    } else {
+                        Ok(Some(s))
+                    }
+                } else {
+                    Ok(None) // User pressed cancel
+                }
+            }
+            Err(e) => Err(format!("Failed to open folder picker: {}", e)),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
