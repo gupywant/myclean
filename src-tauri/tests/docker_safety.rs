@@ -12,8 +12,14 @@ fn test_parse_docker_size_units() {
     assert_eq!(DockerManager::parse_docker_size("1.5GB"), 1_500_000_000);
     assert_eq!(DockerManager::parse_docker_size("2TB"), 2_000_000_000_000);
     // With percentage suffix
-    assert_eq!(DockerManager::parse_docker_size("1.2GB (50%)"), 1_200_000_000);
-    assert_eq!(DockerManager::parse_docker_size("500MB (100%)"), 500_000_000);
+    assert_eq!(
+        DockerManager::parse_docker_size("1.2GB (50%)"),
+        1_200_000_000
+    );
+    assert_eq!(
+        DockerManager::parse_docker_size("500MB (100%)"),
+        500_000_000
+    );
 }
 
 #[test]
@@ -119,7 +125,9 @@ fn test_generic_cleaner_strictly_rejects_docker_pseudo_paths() {
     for err in &res.errors {
         assert!(
             err.error_message.contains("Security Policy Violation")
-                && err.error_message.contains("Docker cleanup requires dedicated scope-specific confirmation"),
+                && err
+                    .error_message
+                    .contains("Docker cleanup requires dedicated scope-specific confirmation"),
             "Expected explicit Docker security policy error, got: {}",
             err.error_message
         );
@@ -136,8 +144,14 @@ fn test_docker_scan_items_marked_ineligible_for_generic_cleanup() {
 
     assert_eq!(rule_id, "RULE_DOCKER_CLUTTER");
     assert_eq!(risk, RiskClassification::ReviewRequired);
-    assert!(!eligible, "Docker clutter must be ineligible for generic filesystem clean");
-    assert!(inelig_reason.is_some(), "Ineligibility reason must explain Docker Studio requirement");
+    assert!(
+        !eligible,
+        "Docker clutter must be ineligible for generic filesystem clean"
+    );
+    assert!(
+        inelig_reason.is_some(),
+        "Ineligibility reason must explain Docker Studio requirement"
+    );
     assert!(
         inelig_reason.unwrap().contains("Docker Studio"),
         "Ineligibility reason must point to Docker Studio"
@@ -145,4 +159,3 @@ fn test_docker_scan_items_marked_ineligible_for_generic_cleanup() {
     assert_eq!(app, Some("Docker".into()));
     assert!(!desc.is_empty());
 }
-

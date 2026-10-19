@@ -194,7 +194,10 @@ fn test_clean_orphaned_data_safety_rejections() {
     // Test targeting user documents
     let home = dirs::home_dir().unwrap();
     let doc_req = CleanOrphanedRequest {
-        paths: vec![home.join("Documents/file.txt").to_string_lossy().to_string()],
+        paths: vec![home
+            .join("Documents/file.txt")
+            .to_string_lossy()
+            .to_string()],
         dry_run: false,
         confirmed: true,
     };

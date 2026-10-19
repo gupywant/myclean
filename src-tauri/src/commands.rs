@@ -9,10 +9,10 @@ use crate::db::{
 use crate::developer::{
     DeveloperArtifactItem, DeveloperCleanRequest, DeveloperEngine, DeveloperScanResult,
 };
-use crate::docker::{
-    DockerCleanRequest, DockerCleanResult, DockerManager, DockerScanResult,
+use crate::docker::{DockerCleanRequest, DockerCleanResult, DockerManager, DockerScanResult};
+use crate::duplicates::{
+    CleanDuplicatesRequest, DuplicateScanProgress, DuplicateScanResult, DuplicateScanner,
 };
-use crate::duplicates::{CleanDuplicatesRequest, DuplicateScanProgress, DuplicateScanResult, DuplicateScanner};
 use crate::notifications::NotificationManager;
 use crate::safety::SafetyGuard;
 use crate::scanner::{ScanProgress, ScanResult, ScanScopeConfig, Scanner};
@@ -68,8 +68,6 @@ pub async fn start_scan(
             }
         });
 
-
-
         // Save scan record to SQLite if scan found results and wasn't cancelled early
         if !res.was_cancelled {
             let record = ScanRecord {
@@ -78,7 +76,8 @@ pub async fn start_scan(
                 duration_ms: res.duration_ms,
                 total_bytes_found: res.total_bytes,
                 total_items_found: res.total_items,
-                category_breakdown_json: serde_json::to_string(&res.categories).unwrap_or_else(|_| "[]".into()),
+                category_breakdown_json: serde_json::to_string(&res.categories)
+                    .unwrap_or_else(|_| "[]".into()),
             };
             let _ = db.insert_scan_record(&record);
 
@@ -125,13 +124,20 @@ pub async fn clean_items(
     if let Ok(prefs) = state.db.get_preferences() {
         if prefs.notify_clean_complete && res.success {
             let msg = if res.dry_run {
-                format!("Simulation complete: {} items evaluated.", res.items_deleted)
+                format!(
+                    "Simulation complete: {} items evaluated.",
+                    res.items_deleted
+                )
             } else {
                 format!("Cleaned {} items. Moved to macOS Trash.", res.items_deleted)
             };
             let _ = NotificationManager::send("myclean", Some("Cleanup Complete"), &msg);
         } else if prefs.notify_clean_failure && !res.success {
-            let _ = NotificationManager::send("myclean", Some("Cleanup Notice"), "Some items could not be moved to Trash.");
+            let _ = NotificationManager::send(
+                "myclean",
+                Some("Cleanup Notice"),
+                "Some items could not be moved to Trash.",
+            );
         }
     }
 
@@ -167,10 +173,16 @@ pub async fn scan_duplicates(
         SafetyGuard::check_path_traversal(trimmed).map_err(|e| e.to_string())?;
         let p = PathBuf::from(trimmed);
         if !p.is_dir() {
-            return Err(format!("Duplicate scan target is not a valid directory: {}", trimmed));
+            return Err(format!(
+                "Duplicate scan target is not a valid directory: {}",
+                trimmed
+            ));
         }
         if SafetyGuard::is_system_protected(&p) {
-            return Err(format!("Duplicate scan rejected: '{}' is a protected macOS system location.", trimmed));
+            return Err(format!(
+                "Duplicate scan rejected: '{}' is a protected macOS system location.",
+                trimmed
+            ));
         }
         p.canonicalize().map_err(|e| e.to_string())?
     } else {
@@ -181,9 +193,14 @@ pub async fn scan_duplicates(
 
     tokio::task::spawn_blocking(move || {
         let app_handle = app.clone();
-        DuplicateScanner::scan_duplicates_advanced(target, min_bytes, cancel, move |prog: DuplicateScanProgress| {
-            let _ = app_handle.emit("duplicate:progress", &prog);
-        })
+        DuplicateScanner::scan_duplicates_advanced(
+            target,
+            min_bytes,
+            cancel,
+            move |prog: DuplicateScanProgress| {
+                let _ = app_handle.emit("duplicate:progress", &prog);
+            },
+        )
     })
     .await
     .map_err(|e| e.to_string())
@@ -200,17 +217,23 @@ pub async fn clean_duplicates(
     state: State<'_, AppState>,
     request: CleanDuplicatesRequest,
 ) -> Result<CleanResult, String> {
-    state.duplicate_clean_cancel_token.store(false, Ordering::Relaxed);
+    state
+        .duplicate_clean_cancel_token
+        .store(false, Ordering::Relaxed);
     let cancel = state.duplicate_clean_cancel_token.clone();
     let db = state.db.clone();
-    tokio::task::spawn_blocking(move || DuplicateScanner::clean_duplicate_groups(request, &db, cancel))
-        .await
-        .map_err(|e| e.to_string())?
+    tokio::task::spawn_blocking(move || {
+        DuplicateScanner::clean_duplicate_groups(request, &db, cancel)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
 pub fn cancel_duplicate_clean(state: State<'_, AppState>) -> bool {
-    state.duplicate_clean_cancel_token.store(true, Ordering::Relaxed);
+    state
+        .duplicate_clean_cancel_token
+        .store(true, Ordering::Relaxed);
     true
 }
 
@@ -292,22 +315,19 @@ pub fn add_to_whitelist(
     path: String,
     reason: String,
 ) -> Result<(), String> {
-    state.db.add_whitelist(&path, &reason).map_err(|e| e.to_string())
+    state
+        .db
+        .add_whitelist(&path, &reason)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn remove_from_whitelist(
-    state: State<'_, AppState>,
-    path: String,
-) -> Result<bool, String> {
+pub fn remove_from_whitelist(state: State<'_, AppState>, path: String) -> Result<bool, String> {
     state.db.remove_whitelist(&path).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn get_app_setting(
-    state: State<'_, AppState>,
-    key: String,
-) -> Result<Option<String>, String> {
+pub fn get_app_setting(state: State<'_, AppState>, key: String) -> Result<Option<String>, String> {
     state.db.get_setting(&key).map_err(|e| e.to_string())
 }
 
@@ -317,7 +337,10 @@ pub fn set_app_setting(
     key: String,
     value: String,
 ) -> Result<(), String> {
-    state.db.set_setting(&key, &value).map_err(|e| e.to_string())
+    state
+        .db
+        .set_setting(&key, &value)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -330,7 +353,10 @@ pub fn update_preferences(
     state: State<'_, AppState>,
     preferences: AppPreferences,
 ) -> Result<AppPreferences, String> {
-    state.db.update_preferences(preferences).map_err(|e| e.to_string())
+    state
+        .db
+        .update_preferences(preferences)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -348,10 +374,7 @@ pub fn add_custom_exclusion(
 }
 
 #[tauri::command]
-pub fn remove_custom_exclusion(
-    state: State<'_, AppState>,
-    path: String,
-) -> Result<bool, String> {
+pub fn remove_custom_exclusion(state: State<'_, AppState>, path: String) -> Result<bool, String> {
     state.db.remove_custom_exclusion(&path)
 }
 
@@ -360,7 +383,10 @@ pub fn query_cleanup_history(
     state: State<'_, AppState>,
     request: HistoryQueryRequest,
 ) -> Result<HistoryQueryResponse, String> {
-    state.db.query_cleanup_history(request).map_err(|e| e.to_string())
+    state
+        .db
+        .query_cleanup_history(request)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -374,7 +400,10 @@ pub fn get_cleanup_analytics(
 pub fn check_database_integrity(
     state: State<'_, AppState>,
 ) -> Result<DatabaseHealthReport, String> {
-    state.db.check_database_integrity().map_err(|e| e.to_string())
+    state
+        .db
+        .check_database_integrity()
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -382,22 +411,19 @@ pub fn prune_history_by_retention(
     state: State<'_, AppState>,
     retention_days: u64,
 ) -> Result<usize, String> {
-    state.db.prune_history(retention_days).map_err(|e| e.to_string())
+    state
+        .db
+        .prune_history(retention_days)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn clear_cleanup_history(
-    state: State<'_, AppState>,
-    confirmed: bool,
-) -> Result<(), String> {
+pub fn clear_cleanup_history(state: State<'_, AppState>, confirmed: bool) -> Result<(), String> {
     state.db.clear_cleanup_history(confirmed)
 }
 
 #[tauri::command]
-pub fn clear_scan_history(
-    state: State<'_, AppState>,
-    confirmed: bool,
-) -> Result<(), String> {
+pub fn clear_scan_history(state: State<'_, AppState>, confirmed: bool) -> Result<(), String> {
     state.db.clear_scan_history(confirmed)
 }
 
@@ -430,7 +456,10 @@ pub async fn analyze_storage(
             return Err(format!("Storage analysis path does not exist: {}", trimmed));
         }
         if SafetyGuard::is_system_protected(&p) {
-            return Err(format!("Storage analysis rejected: '{}' is a protected macOS system location.", trimmed));
+            return Err(format!(
+                "Storage analysis rejected: '{}' is a protected macOS system location.",
+                trimmed
+            ));
         }
         p.canonicalize().map_err(|e| e.to_string())?
     } else {
@@ -439,11 +468,9 @@ pub async fn analyze_storage(
 
     let depth = max_depth.unwrap_or(4).min(8);
 
-    tokio::task::spawn_blocking(move || {
-        StorageAnalyzer::analyze(target_path, depth, cancel)
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    tokio::task::spawn_blocking(move || StorageAnalyzer::analyze(target_path, depth, cancel))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -465,7 +492,9 @@ pub fn open_in_finder(path: String) -> Result<(), String> {
         return Err(format!("Path does not exist: {}", trimmed));
     }
 
-    let canonical = p.canonicalize().map_err(|e| format!("Cannot resolve path: {}", e))?;
+    let canonical = p
+        .canonicalize()
+        .map_err(|e| format!("Cannot resolve path: {}", e))?;
 
     std::process::Command::new("open")
         .arg("-R")
@@ -506,18 +535,22 @@ pub async fn inspect_developer_workspace(
 
     let p = PathBuf::from(trimmed);
     if !p.is_dir() {
-        return Err(format!("Workspace path '{}' is not a valid directory", trimmed));
+        return Err(format!(
+            "Workspace path '{}' is not a valid directory",
+            trimmed
+        ));
     }
     if SafetyGuard::is_system_protected(&p) {
-        return Err(format!("Cannot inspect system-protected directory: {}", trimmed));
+        return Err(format!(
+            "Cannot inspect system-protected directory: {}",
+            trimmed
+        ));
     }
 
     let canonical = p.canonicalize().map_err(|e| e.to_string())?;
-    tokio::task::spawn_blocking(move || {
-        DeveloperEngine::inspect_single_workspace(&canonical)
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    tokio::task::spawn_blocking(move || DeveloperEngine::inspect_single_workspace(&canonical))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]

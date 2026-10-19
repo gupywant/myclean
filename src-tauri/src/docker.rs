@@ -216,7 +216,9 @@ impl DockerManager {
                     || combined_err.contains("docker.sock")
                     || combined_err.contains("connection refused")
                 {
-                    daemon_err = Some("Docker Desktop daemon is stopped or Docker socket is unreachable.".into());
+                    daemon_err = Some(
+                        "Docker Desktop daemon is stopped or Docker socket is unreachable.".into(),
+                    );
                 } else if !stderr_str.trim().is_empty() {
                     daemon_err = Some(stderr_str.trim().to_string());
                 } else {
@@ -230,9 +232,15 @@ impl DockerManager {
         // 2. Health check (if daemon is responding, check for storage corruption or I/O warnings)
         let mut health_warning = None;
         if daemon_running {
-            if let Ok(info_out) = Command::new(&cli).args(["info", "--format", "{{json .}}"]).output() {
+            if let Ok(info_out) = Command::new(&cli)
+                .args(["info", "--format", "{{json .}}"])
+                .output()
+            {
                 let info_str = String::from_utf8_lossy(&info_out.stdout);
-                if info_str.contains("corrupt") || info_str.contains("I/O error") || info_str.contains("inconsistent metadata") {
+                if info_str.contains("corrupt")
+                    || info_str.contains("I/O error")
+                    || info_str.contains("inconsistent metadata")
+                {
                     health_warning = Some("Docker reported filesystem or metadata health warnings. Cleanup is disabled to prevent data corruption.".into());
                 }
             }
@@ -305,7 +313,10 @@ impl DockerManager {
                 if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
                     let rtype = v["Type"].as_str().unwrap_or_default();
                     let size = v["Size"].as_str().map(Self::parse_docker_size).unwrap_or(0);
-                    let rec = v["Reclaimable"].as_str().map(Self::parse_docker_size).unwrap_or(0);
+                    let rec = v["Reclaimable"]
+                        .as_str()
+                        .map(Self::parse_docker_size)
+                        .unwrap_or(0);
                     let count = v["TotalCount"]
                         .as_str()
                         .and_then(|s| s.parse::<usize>().ok())
@@ -533,7 +544,9 @@ impl DockerManager {
     /// Safe selective cleanup of Docker resources
     pub fn clean(req: DockerCleanRequest, db: &Database) -> Result<DockerCleanResult, String> {
         if !req.confirmed {
-            return Err("Unconfirmed Docker cleanup request rejected. Confirmation is required.".into());
+            return Err(
+                "Unconfirmed Docker cleanup request rejected. Confirmation is required.".into(),
+            );
         }
 
         // 1. Immediate Security & Input Validation:
@@ -558,7 +571,9 @@ impl DockerManager {
             return Err("Docker daemon is offline. Cleanup cannot be performed.".into());
         }
         if !status.can_cleanup {
-            return Err(status.health_warning.unwrap_or_else(|| "Docker cleanup is disabled due to health warnings.".into()));
+            return Err(status
+                .health_warning
+                .unwrap_or_else(|| "Docker cleanup is disabled due to health warnings.".into()));
         }
 
         let cli = status.cli_path.as_deref().unwrap_or("docker");
@@ -582,9 +597,9 @@ impl DockerManager {
                             .output();
 
                         let is_running = match inspect_out {
-                            Ok(out) if out.status.success() => {
-                                String::from_utf8_lossy(&out.stdout).trim().eq_ignore_ascii_case("true")
-                            }
+                            Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout)
+                                .trim()
+                                .eq_ignore_ascii_case("true"),
                             _ => false,
                         };
 
@@ -606,7 +621,8 @@ impl DockerManager {
                                 details.push(format!("Removed container '{}'", id));
                             }
                             Ok(out) => {
-                                let err_msg = String::from_utf8_lossy(&out.stderr).trim().to_string();
+                                let err_msg =
+                                    String::from_utf8_lossy(&out.stderr).trim().to_string();
                                 errors.push(CleanErrorItem {
                                     path: format!("docker:container:{}", id),
                                     error_message: err_msg,
@@ -633,7 +649,8 @@ impl DockerManager {
                                 details.push(format!("Removed image '{}'", id));
                             }
                             Ok(out) => {
-                                let err_msg = String::from_utf8_lossy(&out.stderr).trim().to_string();
+                                let err_msg =
+                                    String::from_utf8_lossy(&out.stderr).trim().to_string();
                                 errors.push(CleanErrorItem {
                                     path: format!("docker:image:{}", id),
                                     error_message: err_msg,
@@ -661,7 +678,8 @@ impl DockerManager {
                                 // Parse Total reclaimed space if reported
                                 if let Some(pos) = stdout.find("Total reclaimed space:") {
                                     let sub = &stdout[pos + 22..];
-                                    let space_str = sub.split_whitespace().next().unwrap_or_default();
+                                    let space_str =
+                                        sub.split_whitespace().next().unwrap_or_default();
                                     bytes_freed += Self::parse_docker_size(space_str);
                                 }
                                 details.push("Pruned Docker builder cache".into());
@@ -669,7 +687,9 @@ impl DockerManager {
                             Ok(out) => {
                                 errors.push(CleanErrorItem {
                                     path: "docker:builder_cache".into(),
-                                    error_message: String::from_utf8_lossy(&out.stderr).trim().to_string(),
+                                    error_message: String::from_utf8_lossy(&out.stderr)
+                                        .trim()
+                                        .to_string(),
                                 });
                             }
                             Err(e) => {
@@ -695,7 +715,9 @@ impl DockerManager {
                             Ok(out) => {
                                 errors.push(CleanErrorItem {
                                     path: format!("docker:network:{}", id),
-                                    error_message: String::from_utf8_lossy(&out.stderr).trim().to_string(),
+                                    error_message: String::from_utf8_lossy(&out.stderr)
+                                        .trim()
+                                        .to_string(),
                                 });
                             }
                             Err(e) => {
@@ -726,7 +748,11 @@ impl DockerManager {
             timestamp: chrono::Utc::now().to_rfc3339(),
             bytes_freed,
             items_deleted,
-            method: if req.dry_run { "docker_dry_run".into() } else { "docker_prune".into() },
+            method: if req.dry_run {
+                "docker_dry_run".into()
+            } else {
+                "docker_prune".into()
+            },
             details_json,
         };
 

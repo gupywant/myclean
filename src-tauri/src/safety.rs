@@ -126,15 +126,51 @@ impl SafetyGuard {
 
         // System SIP / Core
         let sys_items = [
-            ("/System", "SIP System Files", "macOS System Integrity Protection root filesystem"),
-            ("/usr", "macOS Core Utilities", "Protected operating system command-line utilities and libraries"),
-            ("/bin", "macOS System Binaries", "Essential root system command binaries"),
-            ("/sbin", "macOS System Admin Binaries", "System administrative daemons and utilities"),
-            ("/private/etc", "System Configurations", "Core macOS networking and daemon configuration files"),
-            ("/Library/Apple", "Apple System Assets", "Apple security components and system runtime signatures"),
-            ("/Library/Security", "Security Framework", "macOS trust settings, keychain daemons, and certificates"),
-            ("/Library/Keychains", "System Keychains", "System-wide certificate stores and security roots"),
-            ("/Volumes", "Mounted Storage", "External volumes, disk images, and remote file shares"),
+            (
+                "/System",
+                "SIP System Files",
+                "macOS System Integrity Protection root filesystem",
+            ),
+            (
+                "/usr",
+                "macOS Core Utilities",
+                "Protected operating system command-line utilities and libraries",
+            ),
+            (
+                "/bin",
+                "macOS System Binaries",
+                "Essential root system command binaries",
+            ),
+            (
+                "/sbin",
+                "macOS System Admin Binaries",
+                "System administrative daemons and utilities",
+            ),
+            (
+                "/private/etc",
+                "System Configurations",
+                "Core macOS networking and daemon configuration files",
+            ),
+            (
+                "/Library/Apple",
+                "Apple System Assets",
+                "Apple security components and system runtime signatures",
+            ),
+            (
+                "/Library/Security",
+                "Security Framework",
+                "macOS trust settings, keychain daemons, and certificates",
+            ),
+            (
+                "/Library/Keychains",
+                "System Keychains",
+                "System-wide certificate stores and security roots",
+            ),
+            (
+                "/Volumes",
+                "Mounted Storage",
+                "External volumes, disk images, and remote file shares",
+            ),
         ];
 
         for (path, cat, exp) in sys_items {
@@ -149,18 +185,66 @@ impl SafetyGuard {
         // User Identity & Documents
         if let Some(home) = dirs::home_dir() {
             let user_items = [
-                ("Library/Keychains", "User Keychains", "User password store, encrypted tokens, and certificates"),
-                ("Library/Mail", "Apple Mail", "Local email databases, attachments, and mailbox accounts"),
-                ("Library/Messages", "iMessage Store", "iMessage conversations, attachments, and sync database"),
-                ("Library/Containers/com.docker.docker/Data/vms", "Docker VM Storage", "Docker Desktop VM virtual disk files (Docker.raw)"),
-                ("Documents", "User Documents", "Personal user work documents and project files"),
-                ("Desktop", "User Desktop", "Personal desktop files and active workspace items"),
-                ("Pictures", "Photos & Pictures", "Personal photos, image libraries, and graphics"),
-                ("Music", "Music & Audio", "Personal audio files and Music application library"),
-                ("Movies", "Movies & Video", "Personal video projects and movie recordings"),
-                (".ssh", "SSH Credentials", "SSH private/public key pairs and server known hosts"),
-                (".gnupg", "GnuPG Keys", "GPG cryptographic keys and trust databases"),
-                ("Library/Mobile Documents", "iCloud Drive", "iCloud synchronized files and cloud documents"),
+                (
+                    "Library/Keychains",
+                    "User Keychains",
+                    "User password store, encrypted tokens, and certificates",
+                ),
+                (
+                    "Library/Mail",
+                    "Apple Mail",
+                    "Local email databases, attachments, and mailbox accounts",
+                ),
+                (
+                    "Library/Messages",
+                    "iMessage Store",
+                    "iMessage conversations, attachments, and sync database",
+                ),
+                (
+                    "Library/Containers/com.docker.docker/Data/vms",
+                    "Docker VM Storage",
+                    "Docker Desktop VM virtual disk files (Docker.raw)",
+                ),
+                (
+                    "Documents",
+                    "User Documents",
+                    "Personal user work documents and project files",
+                ),
+                (
+                    "Desktop",
+                    "User Desktop",
+                    "Personal desktop files and active workspace items",
+                ),
+                (
+                    "Pictures",
+                    "Photos & Pictures",
+                    "Personal photos, image libraries, and graphics",
+                ),
+                (
+                    "Music",
+                    "Music & Audio",
+                    "Personal audio files and Music application library",
+                ),
+                (
+                    "Movies",
+                    "Movies & Video",
+                    "Personal video projects and movie recordings",
+                ),
+                (
+                    ".ssh",
+                    "SSH Credentials",
+                    "SSH private/public key pairs and server known hosts",
+                ),
+                (
+                    ".gnupg",
+                    "GnuPG Keys",
+                    "GPG cryptographic keys and trust databases",
+                ),
+                (
+                    "Library/Mobile Documents",
+                    "iCloud Drive",
+                    "iCloud synchronized files and cloud documents",
+                ),
             ];
 
             for (sub, cat, exp) in user_items {
@@ -182,14 +266,18 @@ impl SafetyGuard {
     pub fn validate_custom_exclusion_candidate(path_str: &str) -> Result<PathBuf, SafetyError> {
         let trimmed = path_str.trim();
         if trimmed.is_empty() {
-            return Err(SafetyError::InvalidExclusion("Exclusion path cannot be empty".into()));
+            return Err(SafetyError::InvalidExclusion(
+                "Exclusion path cannot be empty".into(),
+            ));
         }
 
         Self::check_path_traversal(trimmed)?;
 
         let p = PathBuf::from(trimmed);
         if trimmed == "/" {
-            return Err(SafetyError::InvalidExclusion("Root '/' cannot be added as a custom exclusion".into()));
+            return Err(SafetyError::InvalidExclusion(
+                "Root '/' cannot be added as a custom exclusion".into(),
+            ));
         }
 
         // Check if path is already covered by mandatory system protection
@@ -328,7 +416,10 @@ impl SafetyGuard {
     }
 
     /// Checks if a symlink target escapes an allowed root directory.
-    pub fn symlink_escapes_boundary<P: AsRef<Path>, B: AsRef<Path>>(symlink_path: P, boundary: B) -> bool {
+    pub fn symlink_escapes_boundary<P: AsRef<Path>, B: AsRef<Path>>(
+        symlink_path: P,
+        boundary: B,
+    ) -> bool {
         let p = symlink_path.as_ref();
         let boundary = boundary.as_ref();
 
@@ -343,7 +434,9 @@ impl SafetyGuard {
                 target
             };
 
-            if let (Ok(canon_resolved), Ok(canon_boundary)) = (resolved.canonicalize(), boundary.canonicalize()) {
+            if let (Ok(canon_resolved), Ok(canon_boundary)) =
+                (resolved.canonicalize(), boundary.canonicalize())
+            {
                 return !canon_resolved.starts_with(canon_boundary);
             }
             // Conservative: if canonicalize fails, assume it might escape
@@ -407,41 +500,42 @@ impl SafetyGuard {
         let path_str = path.to_string_lossy().to_lowercase();
 
         // Identify common desktop application signatures
-        let app_target: Option<String> = if path_str.contains("chrome") || path_str.contains("google/chrome") {
-            Some("Google Chrome".to_string())
-        } else if path_str.contains("slack") {
-            Some("Slack".to_string())
-        } else if path_str.contains("xcode") {
-            Some("Xcode".to_string())
-        } else if path_str.contains("docker") {
-            Some("Docker".to_string())
-        } else if path_str.contains("firefox") {
-            Some("firefox".to_string())
-        } else if path_str.contains("brave") {
-            Some("Brave Browser".to_string())
-        } else if path_str.contains("edge") || path_str.contains("microsoft edge") {
-            Some("Microsoft Edge".to_string())
-        } else if path_str.contains("telegram") {
-            Some("Telegram".to_string())
-        } else if path_str.contains("discord") {
-            Some("Discord".to_string())
-        } else if path_str.contains("teams") {
-            Some("Microsoft Teams".to_string())
-        } else if path_str.contains("spotify") {
-            Some("Spotify".to_string())
-        } else if path_str.contains("cursor") {
-            Some("Cursor".to_string())
-        } else if path_str.contains("code") {
-            Some("Code".to_string())
-        } else if path_str.contains("safari") {
-            Some("Safari".to_string())
-        } else if path_str.contains("mail") {
-            Some("Mail".to_string())
-        } else if path_str.ends_with(".app") {
-            path.file_stem().map(|s| s.to_string_lossy().to_string())
-        } else {
-            None
-        };
+        let app_target: Option<String> =
+            if path_str.contains("chrome") || path_str.contains("google/chrome") {
+                Some("Google Chrome".to_string())
+            } else if path_str.contains("slack") {
+                Some("Slack".to_string())
+            } else if path_str.contains("xcode") {
+                Some("Xcode".to_string())
+            } else if path_str.contains("docker") {
+                Some("Docker".to_string())
+            } else if path_str.contains("firefox") {
+                Some("firefox".to_string())
+            } else if path_str.contains("brave") {
+                Some("Brave Browser".to_string())
+            } else if path_str.contains("edge") || path_str.contains("microsoft edge") {
+                Some("Microsoft Edge".to_string())
+            } else if path_str.contains("telegram") {
+                Some("Telegram".to_string())
+            } else if path_str.contains("discord") {
+                Some("Discord".to_string())
+            } else if path_str.contains("teams") {
+                Some("Microsoft Teams".to_string())
+            } else if path_str.contains("spotify") {
+                Some("Spotify".to_string())
+            } else if path_str.contains("cursor") {
+                Some("Cursor".to_string())
+            } else if path_str.contains("code") {
+                Some("Code".to_string())
+            } else if path_str.contains("safari") {
+                Some("Safari".to_string())
+            } else if path_str.contains("mail") {
+                Some("Mail".to_string())
+            } else if path_str.ends_with(".app") {
+                path.file_stem().map(|s| s.to_string_lossy().to_string())
+            } else {
+                None
+            };
 
         let target_name = app_target?;
         let mut sys = System::new();
@@ -450,7 +544,9 @@ impl SafetyGuard {
         for proc in sys.processes().values() {
             let proc_name = proc.name().to_string_lossy();
             if proc_name.eq_ignore_ascii_case(&target_name)
-                || proc_name.to_lowercase().contains(&target_name.to_lowercase())
+                || proc_name
+                    .to_lowercase()
+                    .contains(&target_name.to_lowercase())
             {
                 return Some(target_name.to_string());
             }
@@ -496,7 +592,10 @@ impl SafetyGuard {
             };
 
             if let Some(target) = app_target {
-                if !running_apps.iter().any(|a: &String| a.eq_ignore_ascii_case(target)) {
+                if !running_apps
+                    .iter()
+                    .any(|a: &String| a.eq_ignore_ascii_case(target))
+                {
                     for proc in sys.processes().values() {
                         let proc_name = proc.name().to_string_lossy();
                         if proc_name.eq_ignore_ascii_case(target)
@@ -516,7 +615,9 @@ impl SafetyGuard {
     /// Checks for path traversal attempts (relative '..' components)
     pub fn check_path_traversal<P: AsRef<Path>>(path: P) -> Result<(), SafetyError> {
         let p = path.as_ref();
-        if p.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        if p.components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
             return Err(SafetyError::PathTraversal(p.to_string_lossy().to_string()));
         }
         Ok(())
@@ -542,21 +643,32 @@ impl SafetyGuard {
         if p.is_symlink() {
             let target = std::fs::read_link(p)?;
             if Self::is_system_protected(&target) {
-                return Err(SafetyError::SystemProtected(target.to_string_lossy().to_string()));
+                return Err(SafetyError::SystemProtected(
+                    target.to_string_lossy().to_string(),
+                ));
             }
             if Self::is_user_data_protected(&target) {
-                return Err(SafetyError::UserProtected(target.to_string_lossy().to_string()));
+                return Err(SafetyError::UserProtected(
+                    target.to_string_lossy().to_string(),
+                ));
             }
         }
 
         // 4. Database & persistent state protection
-        if Self::is_database_or_persistent_state(p) || Self::is_database_or_persistent_state(&canonical) {
+        if Self::is_database_or_persistent_state(p)
+            || Self::is_database_or_persistent_state(&canonical)
+        {
             return Err(SafetyError::DatabaseOrPersistentState(canonical_str));
         }
 
         // 5. Git tree protection: never touch active git repositories
-        if canonical_str.contains("/.git/objects") || canonical_str.contains("/.git/refs") || canonical_str.contains("/.git/HEAD") {
-            return Err(SafetyError::UserProtected("Protected active Git repository data".into()));
+        if canonical_str.contains("/.git/objects")
+            || canonical_str.contains("/.git/refs")
+            || canonical_str.contains("/.git/HEAD")
+        {
+            return Err(SafetyError::UserProtected(
+                "Protected active Git repository data".into(),
+            ));
         }
 
         // 6. System protected check
@@ -572,12 +684,16 @@ impl SafetyGuard {
         // 7. Prevent deleting root or user home directory
         if let Some(home) = dirs::home_dir() {
             if canonical == home || p == home {
-                return Err(SafetyError::UserProtected("Cannot delete user home directory".into()));
+                return Err(SafetyError::UserProtected(
+                    "Cannot delete user home directory".into(),
+                ));
             }
         }
 
         if canonical == Path::new("/") || p == Path::new("/") {
-            return Err(SafetyError::SystemProtected("Cannot delete root directory".into()));
+            return Err(SafetyError::SystemProtected(
+                "Cannot delete root directory".into(),
+            ));
         }
 
         // 8. Active application protection check (only if not running a unit test)
@@ -691,10 +807,18 @@ mod tests {
 
     #[test]
     fn test_mandatory_exclusions() {
-        assert!(SafetyGuard::is_mandatory_exclusion(Path::new("/Users/user/project/.git/HEAD")));
-        assert!(SafetyGuard::is_mandatory_exclusion(Path::new("/Users/user/Library/Containers/com.docker.docker/Data/vms/Docker.raw")));
-        assert!(SafetyGuard::is_mandatory_exclusion(Path::new("/private/var/folders")));
-        assert!(SafetyGuard::is_mandatory_exclusion(Path::new("/System/Library")));
+        assert!(SafetyGuard::is_mandatory_exclusion(Path::new(
+            "/Users/user/project/.git/HEAD"
+        )));
+        assert!(SafetyGuard::is_mandatory_exclusion(Path::new(
+            "/Users/user/Library/Containers/com.docker.docker/Data/vms/Docker.raw"
+        )));
+        assert!(SafetyGuard::is_mandatory_exclusion(Path::new(
+            "/private/var/folders"
+        )));
+        assert!(SafetyGuard::is_mandatory_exclusion(Path::new(
+            "/System/Library"
+        )));
         if let Some(home) = dirs::home_dir() {
             let icloud = home.join("Library/Mobile Documents");
             assert!(SafetyGuard::is_mandatory_exclusion(&icloud));
@@ -702,7 +826,8 @@ mod tests {
             let container_app_data = home.join("Library/Containers/com.example.app/Data/Documents");
             assert!(SafetyGuard::is_mandatory_exclusion(&container_app_data));
 
-            let safe_container_cache = home.join("Library/Containers/com.apple.mail/Data/Library/Mail Downloads");
+            let safe_container_cache =
+                home.join("Library/Containers/com.apple.mail/Data/Library/Mail Downloads");
             assert!(!SafetyGuard::is_mandatory_exclusion(&safe_container_cache));
         }
     }
@@ -719,7 +844,10 @@ mod tests {
         let symlink_inside = temp_dir.join("link_inside");
         let _ = std::os::unix::fs::symlink(&inside_file, &symlink_inside);
 
-        assert!(!SafetyGuard::symlink_escapes_boundary(&symlink_inside, &temp_dir));
+        assert!(!SafetyGuard::symlink_escapes_boundary(
+            &symlink_inside,
+            &temp_dir
+        ));
 
         let outside_file = std::env::temp_dir().join("outside.txt");
         let _ = std::fs::write(&outside_file, b"outside");
@@ -727,7 +855,10 @@ mod tests {
         let symlink_outside = temp_dir.join("link_outside");
         let _ = std::os::unix::fs::symlink(&outside_file, &symlink_outside);
 
-        assert!(SafetyGuard::symlink_escapes_boundary(&symlink_outside, &temp_dir));
+        assert!(SafetyGuard::symlink_escapes_boundary(
+            &symlink_outside,
+            &temp_dir
+        ));
 
         let _ = std::fs::remove_dir_all(&temp_dir);
         let _ = std::fs::remove_file(&outside_file);
@@ -735,12 +866,23 @@ mod tests {
 
     #[test]
     fn test_database_or_persistent_state_protection() {
-        assert!(SafetyGuard::is_database_or_persistent_state(Path::new("/Users/user/Library/Safari/History.db")));
-        assert!(SafetyGuard::is_database_or_persistent_state(Path::new("/Users/user/Library/Safari/Bookmarks.plist")));
-        assert!(SafetyGuard::is_database_or_persistent_state(Path::new("/Users/user/Library/Application Support/Google/Chrome/Default/Cookies")));
-        assert!(SafetyGuard::is_database_or_persistent_state(Path::new("/Users/user/Library/Application Support/Slack/IndexedDB")));
-        assert!(SafetyGuard::is_database_or_persistent_state(Path::new("/Users/user/Library/Preferences/com.apple.finder.plist")));
-        assert!(!SafetyGuard::is_database_or_persistent_state(Path::new("/Users/user/Library/Caches/Google/Chrome/data_0")));
+        assert!(SafetyGuard::is_database_or_persistent_state(Path::new(
+            "/Users/user/Library/Safari/History.db"
+        )));
+        assert!(SafetyGuard::is_database_or_persistent_state(Path::new(
+            "/Users/user/Library/Safari/Bookmarks.plist"
+        )));
+        assert!(SafetyGuard::is_database_or_persistent_state(Path::new(
+            "/Users/user/Library/Application Support/Google/Chrome/Default/Cookies"
+        )));
+        assert!(SafetyGuard::is_database_or_persistent_state(Path::new(
+            "/Users/user/Library/Application Support/Slack/IndexedDB"
+        )));
+        assert!(SafetyGuard::is_database_or_persistent_state(Path::new(
+            "/Users/user/Library/Preferences/com.apple.finder.plist"
+        )));
+        assert!(!SafetyGuard::is_database_or_persistent_state(Path::new(
+            "/Users/user/Library/Caches/Google/Chrome/data_0"
+        )));
     }
 }
-

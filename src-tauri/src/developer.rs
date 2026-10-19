@@ -194,7 +194,9 @@ impl DeveloperProvider for XcodeDerivedDataProvider {
             };
 
             if SafetyGuard::is_system_protected(&canonical) {
-                return Err(SafetyError::SystemProtected(canonical.to_string_lossy().to_string()));
+                return Err(SafetyError::SystemProtected(
+                    canonical.to_string_lossy().to_string(),
+                ));
             }
 
             if !canonical.starts_with(&derived_canonical) && !canonical.starts_with(&derived_root) {
@@ -313,7 +315,10 @@ impl DeveloperProvider for HomebrewCacheProvider {
                             Err(_) => continue,
                         };
                         items.push(DeveloperArtifactItem {
-                            id: format!("brew_{}", path.file_name().unwrap_or_default().to_string_lossy()),
+                            id: format!(
+                                "brew_{}",
+                                path.file_name().unwrap_or_default().to_string_lossy()
+                            ),
                             provider_id: self.id().to_string(),
                             provider_name: self.name().to_string(),
                             category: self.category().to_string(),
@@ -354,7 +359,9 @@ impl DeveloperProvider for HomebrewCacheProvider {
     fn validate(&self, paths: &[String]) -> Result<Vec<PathBuf>, SafetyError> {
         let home = dirs::home_dir().ok_or(SafetyError::NotFound("Home not found".into()))?;
         let brew_root = home.join("Library/Caches/Homebrew");
-        let brew_canonical = brew_root.canonicalize().unwrap_or_else(|_| brew_root.clone());
+        let brew_canonical = brew_root
+            .canonicalize()
+            .unwrap_or_else(|_| brew_root.clone());
 
         let mut validated = Vec::new();
         for p_str in paths {
@@ -366,7 +373,9 @@ impl DeveloperProvider for HomebrewCacheProvider {
             };
 
             if SafetyGuard::is_system_protected(&canonical) {
-                return Err(SafetyError::SystemProtected(canonical.to_string_lossy().to_string()));
+                return Err(SafetyError::SystemProtected(
+                    canonical.to_string_lossy().to_string(),
+                ));
             }
 
             if !canonical.starts_with(&brew_canonical) && !canonical.starts_with(&brew_root) {
@@ -449,8 +458,13 @@ impl DeveloperProvider for CargoCacheProvider {
 
             let mut visited = HashSet::new();
             let mut skipped = Vec::new();
-            let (alloc, logical, count) =
-                Scanner::measure_path_detailed(&target_path, &mut visited, &mut skipped, &[], cancel);
+            let (alloc, logical, count) = Scanner::measure_path_detailed(
+                &target_path,
+                &mut visited,
+                &mut skipped,
+                &[],
+                cancel,
+            );
 
             if logical > 0 {
                 items.push(DeveloperArtifactItem {
@@ -480,7 +494,11 @@ impl DeveloperProvider for CargoCacheProvider {
     fn estimate(&self) -> Result<u64, String> {
         let home = dirs::home_dir().ok_or("Cannot determine user home directory")?;
         let mut total = 0;
-        for subpath in &[".cargo/registry/cache", ".cargo/registry/src", ".cargo/git/db"] {
+        for subpath in &[
+            ".cargo/registry/cache",
+            ".cargo/registry/src",
+            ".cargo/git/db",
+        ] {
             let p = home.join(subpath);
             if p.is_dir() {
                 let (size, _) = Scanner::measure_path(&p);
@@ -504,7 +522,9 @@ impl DeveloperProvider for CargoCacheProvider {
             };
 
             if SafetyGuard::is_system_protected(&canonical) {
-                return Err(SafetyError::SystemProtected(canonical.to_string_lossy().to_string()));
+                return Err(SafetyError::SystemProtected(
+                    canonical.to_string_lossy().to_string(),
+                ));
             }
 
             // CRITICAL GUARDRAIL: Never allow deleting .cargo/bin, .cargo/config.toml, credentials.toml, or root .cargo
@@ -657,7 +677,9 @@ impl DeveloperProvider for NpmCacheProvider {
             };
 
             if SafetyGuard::is_system_protected(&canonical) {
-                return Err(SafetyError::SystemProtected(canonical.to_string_lossy().to_string()));
+                return Err(SafetyError::SystemProtected(
+                    canonical.to_string_lossy().to_string(),
+                ));
             }
 
             // CRITICAL: Only allow paths inside .npm/_cacache. Never touch root ~/.npm or ~/.npmrc
@@ -795,7 +817,9 @@ impl DeveloperProvider for PnpmCacheProvider {
             };
 
             if SafetyGuard::is_system_protected(&canonical) {
-                return Err(SafetyError::SystemProtected(canonical.to_string_lossy().to_string()));
+                return Err(SafetyError::SystemProtected(
+                    canonical.to_string_lossy().to_string(),
+                ));
             }
 
             let is_in_allowed = allowed.iter().any(|a| {
@@ -941,7 +965,9 @@ impl DeveloperProvider for YarnCacheProvider {
             };
 
             if SafetyGuard::is_system_protected(&canonical) {
-                return Err(SafetyError::SystemProtected(canonical.to_string_lossy().to_string()));
+                return Err(SafetyError::SystemProtected(
+                    canonical.to_string_lossy().to_string(),
+                ));
             }
 
             let is_in_allowed = allowed.iter().any(|a| {
@@ -1075,7 +1101,9 @@ impl DeveloperProvider for GradleCacheProvider {
             };
 
             if SafetyGuard::is_system_protected(&canonical) {
-                return Err(SafetyError::SystemProtected(canonical.to_string_lossy().to_string()));
+                return Err(SafetyError::SystemProtected(
+                    canonical.to_string_lossy().to_string(),
+                ));
             }
 
             // CRITICAL GUARDRAIL: Never touch wrapper, gradle.properties, or keystores
@@ -1210,7 +1238,9 @@ impl DeveloperProvider for SwiftPmCacheProvider {
             };
 
             if SafetyGuard::is_system_protected(&canonical) {
-                return Err(SafetyError::SystemProtected(canonical.to_string_lossy().to_string()));
+                return Err(SafetyError::SystemProtected(
+                    canonical.to_string_lossy().to_string(),
+                ));
             }
 
             if !canonical.starts_with(&spm_canonical) {
@@ -1252,7 +1282,9 @@ impl WorkspaceArtifactsProvider {
 
     /// Verifies that a target path is an authentic Rust `target` or Node `node_modules`
     /// backed by an authentic parent manifest (Cargo.toml or package.json)
-    pub fn verify_workspace_artifact(artifact_path: &Path) -> Result<(&'static str, PathBuf), SafetyError> {
+    pub fn verify_workspace_artifact(
+        artifact_path: &Path,
+    ) -> Result<(&'static str, PathBuf), SafetyError> {
         SafetyGuard::check_path_traversal(artifact_path)?;
 
         let canonical = match artifact_path.canonicalize() {
@@ -1261,7 +1293,9 @@ impl WorkspaceArtifactsProvider {
         };
 
         if SafetyGuard::is_system_protected(&canonical) {
-            return Err(SafetyError::SystemProtected(canonical.to_string_lossy().to_string()));
+            return Err(SafetyError::SystemProtected(
+                canonical.to_string_lossy().to_string(),
+            ));
         }
 
         let parent = canonical
@@ -1396,8 +1430,13 @@ impl DeveloperProvider for WorkspaceArtifactsProvider {
             if nm_path.is_dir() && ws.join("package.json").is_file() {
                 let mut visited = HashSet::new();
                 let mut skipped = Vec::new();
-                let (alloc, logical, count) =
-                    Scanner::measure_path_detailed(&nm_path, &mut visited, &mut skipped, &[], cancel);
+                let (alloc, logical, count) = Scanner::measure_path_detailed(
+                    &nm_path,
+                    &mut visited,
+                    &mut skipped,
+                    &[],
+                    cancel,
+                );
 
                 if logical > 0 {
                     items.push(DeveloperArtifactItem {
@@ -1527,7 +1566,10 @@ where
                 items_failed += 1;
                 errors.push(CleanErrorItem {
                     path: path.to_string_lossy().to_string(),
-                    error_message: format!("Security violation during pre-clean verification: {}", e),
+                    error_message: format!(
+                        "Security violation during pre-clean verification: {}",
+                        e
+                    ),
                 });
                 continue;
             }
@@ -1566,12 +1608,19 @@ where
         timestamp: chrono::Utc::now().to_rfc3339(),
         bytes_freed,
         items_deleted,
-        method: if dry_run { "developer_dry_run".into() } else { "developer_trash".into() },
+        method: if dry_run {
+            "developer_dry_run".into()
+        } else {
+            "developer_trash".into()
+        },
         details_json,
     };
 
     if let Err(e) = db.insert_cleanup_record(&record) {
-        eprintln!("Warning: failed to record developer cleanup audit to SQLite: {}", e);
+        eprintln!(
+            "Warning: failed to record developer cleanup audit to SQLite: {}",
+            e
+        );
     }
 
     Ok(CleanResult {
@@ -1731,7 +1780,9 @@ impl DeveloperEngine {
                 total_failed += 1;
                 all_errors.push(CleanErrorItem {
                     path: target_path.clone(),
-                    error_message: "Path was rejected by all developer providers' safety validation rules.".into(),
+                    error_message:
+                        "Path was rejected by all developer providers' safety validation rules."
+                            .into(),
                 });
             }
         }
@@ -1752,7 +1803,11 @@ impl DeveloperEngine {
             timestamp: chrono::Utc::now().to_rfc3339(),
             bytes_freed: total_freed,
             items_deleted: total_deleted,
-            method: if req.dry_run { "developer_dry_run".into() } else { "developer_trash".into() },
+            method: if req.dry_run {
+                "developer_dry_run".into()
+            } else {
+                "developer_trash".into()
+            },
             details_json,
         };
 

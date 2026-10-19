@@ -433,12 +433,12 @@
     6. macOS Trash & Large Candidate Files
     7. Docker Engine Resources
   - Verified live UI state in the running application: smoothly progressed from 0% to 100%, culminating in the final results view with **7.9 GB Estimated Recoverable Space (59 candidate items)**, green checkmarks across all 7 stage cards, and the interactive **"Review Cleanup (7.9 GB)"** button.
-- [x] **Regression Test Suites:**
-  - Added Rust tests `test_session_id_coordination`, `test_progress_event_serialization_compatibility`, `test_repeated_scan_execution`, and `test_stale_session_event_rejection_logic` in `tests/scanner_progress.rs`.
-  - **101/101 cargo tests passing** with 0 warnings across all test suites (`cargo test`).
-  - Added frontend test suite `tests/scanner_progress.test.ts` (6/6 tests passing via `npx tsx`) verifying full lifecycle transitions from initialization to final completed result screen with 100% stage card finalization and selected bytes summation.
-  - Added defensive category completion guarantee in `useCleanStore.ts` and `SmartScanCenter.tsx` ensuring 100% is displayed when `scanResult` is present.
-  - Clean TypeScript checks (`npx tsc --noEmit`), Vite production build (`npm run build`), and Clippy checks (`cargo clippy -- -D warnings`).
+- [x] **Native macOS Notification Icon Integration (`notifications.rs`):**
+  - Diagnosed root cause of generic white placeholder icon: `osascript` executed in a detached `/usr/bin/osascript` subshell where macOS Notification Center fell back to the unbundled command-line tool icon.
+  - Replaced subshell execution with native Cocoa `NSUserNotification` integration via `mac-notification-sys`.
+  - Configured explicit application identity (`set_application("com.myclean.app")`) and embedded `_identityImage` resolution (`notif.app_icon(...)`) linking directly to `/Applications/myclean.app/Contents/Resources/icon.icns`.
+  - Added unit test `test_resolve_app_icon` verifying bundle icon resolution (102/102 cargo tests passing).
+  - Built fresh release and installed to `/Applications/myclean.app`.
 
 ### Phase 12: Homebrew Tap & Update Checker (Planned / Next)
 - [ ] Create Homebrew Tap (`gupywant/homebrew-tap`) and Cask formula (`Casks/myclean.rb`).

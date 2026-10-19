@@ -245,7 +245,13 @@ impl AppInspector {
 
         let safe_bid = bundle_id
             .chars()
-            .map(|c| if c.is_alphanumeric() || c == '.' { c } else { '_' })
+            .map(|c| {
+                if c.is_alphanumeric() || c == '.' {
+                    c
+                } else {
+                    '_'
+                }
+            })
             .collect::<String>();
         let cached_png = cache_dir.join(format!("{}.png", safe_bid));
 
@@ -740,7 +746,10 @@ impl AppInspector {
             installed.iter().map(|a| a.name.to_lowercase()).collect();
 
         // Also add system applications to avoid false positives
-        for sys_dir in &["/System/Applications", "/System/Library/CoreServices/Applications"] {
+        for sys_dir in &[
+            "/System/Applications",
+            "/System/Library/CoreServices/Applications",
+        ] {
             let p = Path::new(sys_dir);
             if let Ok(entries) = fs::read_dir(p) {
                 for entry in entries.flatten() {
@@ -1180,7 +1189,10 @@ impl AppInspector {
                 items_failed += 1;
                 errors.push(CleanErrorItem {
                     path: target.to_string_lossy().to_string(),
-                    error_message: format!("Security violation during pre-clean verification: {}", e),
+                    error_message: format!(
+                        "Security violation during pre-clean verification: {}",
+                        e
+                    ),
                 });
                 continue;
             }
@@ -1194,8 +1206,8 @@ impl AppInspector {
                         items_failed += 1;
                         errors.push(CleanErrorItem {
                             path: target.to_string_lossy().to_string(),
-                            error_message: "File was reported trashed but still exists on filesystem."
-                                .into(),
+                            error_message:
+                                "File was reported trashed but still exists on filesystem.".into(),
                         });
                     }
                 }
@@ -1362,7 +1374,10 @@ impl AppInspector {
                 items_failed += 1;
                 errors.push(CleanErrorItem {
                     path: target.to_string_lossy().to_string(),
-                    error_message: format!("Security violation during pre-clean verification: {}", e),
+                    error_message: format!(
+                        "Security violation during pre-clean verification: {}",
+                        e
+                    ),
                 });
                 continue;
             }
@@ -1530,7 +1545,10 @@ mod tests {
 
     #[test]
     fn test_base64_encode() {
-        assert_eq!(AppInspector::base64_encode(b"hello world"), "aGVsbG8gd29ybGQ=");
+        assert_eq!(
+            AppInspector::base64_encode(b"hello world"),
+            "aGVsbG8gd29ybGQ="
+        );
         assert_eq!(AppInspector::base64_encode(b"myclean"), "bXljbGVhbg==");
         assert_eq!(AppInspector::base64_encode(b""), "");
     }

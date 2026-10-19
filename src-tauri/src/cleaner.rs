@@ -78,7 +78,9 @@ impl Cleaner {
         }
 
         if !req.confirmed && !req.dry_run {
-            return Err("Execution rejected: Cleanup confirmation was not explicitly provided.".to_string());
+            return Err(
+                "Execution rejected: Cleanup confirmation was not explicitly provided.".to_string(),
+            );
         }
 
         let mut bytes_freed = 0u64;
@@ -162,9 +164,12 @@ impl Cleaner {
 
             // Race condition check: Verify if metadata changed significantly since scan if expected target metadata is supplied
             if let Some(target_info) = targets_map.get(path_str) {
-                if let (Some(expected_mod), Ok(meta)) = (&target_info.expected_modified_at, fs::metadata(&canonical)) {
+                if let (Some(expected_mod), Ok(meta)) =
+                    (&target_info.expected_modified_at, fs::metadata(&canonical))
+                {
                     if let Ok(actual_mod) = meta.modified() {
-                        let actual_mod_str = chrono::DateTime::<chrono::Utc>::from(actual_mod).to_rfc3339();
+                        let actual_mod_str =
+                            chrono::DateTime::<chrono::Utc>::from(actual_mod).to_rfc3339();
                         // If file was modified after scan, flag as modified and skip for safety
                         if actual_mod_str > *expected_mod {
                             errors.push(CleanErrorItem {
@@ -184,7 +189,10 @@ impl Cleaner {
                 Err(e) => {
                     errors.push(CleanErrorItem {
                         path: path_str.clone(),
-                        error_message: format!("Failed to capture entry path metadata snapshot: {}", e),
+                        error_message: format!(
+                            "Failed to capture entry path metadata snapshot: {}",
+                            e
+                        ),
                     });
                     items_failed += 1;
                     continue;
@@ -195,7 +203,10 @@ impl Cleaner {
                 Err(e) => {
                     errors.push(CleanErrorItem {
                         path: path_str.clone(),
-                        error_message: format!("Failed to capture canonical metadata snapshot: {}", e),
+                        error_message: format!(
+                            "Failed to capture canonical metadata snapshot: {}",
+                            e
+                        ),
                     });
                     items_failed += 1;
                     continue;
@@ -206,7 +217,10 @@ impl Cleaner {
             if let Err(e) = SafetyGuard::verify_unaltered(&p, &p_snapshot) {
                 errors.push(CleanErrorItem {
                     path: path_str.clone(),
-                    error_message: format!("Security violation during pre-clean verification (entry path altered): {}", e),
+                    error_message: format!(
+                        "Security violation during pre-clean verification (entry path altered): {}",
+                        e
+                    ),
                 });
                 items_failed += 1;
                 continue;
@@ -214,7 +228,10 @@ impl Cleaner {
             if let Err(e) = SafetyGuard::verify_unaltered(&canonical, &canonical_snapshot) {
                 errors.push(CleanErrorItem {
                     path: path_str.clone(),
-                    error_message: format!("Security violation during pre-clean verification (target altered): {}", e),
+                    error_message: format!(
+                        "Security violation during pre-clean verification (target altered): {}",
+                        e
+                    ),
                 });
                 items_failed += 1;
                 continue;
@@ -294,11 +311,15 @@ impl Cleaner {
 
     /// Check which active applications are associated with candidate paths
     pub fn check_active_applications(paths: &[String]) -> Vec<ActiveAppWarning> {
-        let mut warnings_map: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+        let mut warnings_map: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
         for p_str in paths {
             let p = std::path::Path::new(p_str);
             if let Some(app_name) = SafetyGuard::detect_running_application(p) {
-                warnings_map.entry(app_name).or_default().push(p_str.clone());
+                warnings_map
+                    .entry(app_name)
+                    .or_default()
+                    .push(p_str.clone());
             }
         }
         warnings_map
@@ -374,7 +395,9 @@ mod tests {
         };
         let res = Cleaner::clean_items(req, &db, cancel);
         assert!(res.is_err());
-        assert!(res.unwrap_err().contains("confirmation was not explicitly provided"));
+        assert!(res
+            .unwrap_err()
+            .contains("confirmation was not explicitly provided"));
     }
 
     #[test]
@@ -414,7 +437,16 @@ mod tests {
         let res = Cleaner::clean_items(req, &db, cancel).unwrap();
         assert!(!res.success);
         assert_eq!(res.items_failed, 1);
-        assert!(res.errors[0].error_message.to_lowercase().contains("persistent database") || res.errors[0].error_message.to_lowercase().contains("database"));
+        assert!(
+            res.errors[0]
+                .error_message
+                .to_lowercase()
+                .contains("persistent database")
+                || res.errors[0]
+                    .error_message
+                    .to_lowercase()
+                    .contains("database")
+        );
         assert!(db_file.exists()); // Must remain intact
 
         let _ = std::fs::remove_dir_all(&temp);
@@ -447,7 +479,9 @@ mod tests {
         let res = Cleaner::clean_items(req, &db, cancel).unwrap();
         assert!(!res.success);
         assert_eq!(res.items_skipped, 1);
-        assert!(res.errors[0].error_message.contains("File was modified after scanning completed"));
+        assert!(res.errors[0]
+            .error_message
+            .contains("File was modified after scanning completed"));
         assert!(target_file.exists()); // Must NOT have been deleted
 
         let _ = std::fs::remove_dir_all(&temp);
@@ -476,7 +510,9 @@ mod tests {
         for err in &res.errors {
             assert!(
                 err.error_message.contains("Security Policy Violation")
-                    && err.error_message.contains("Docker cleanup requires dedicated scope-specific confirmation"),
+                    && err
+                        .error_message
+                        .contains("Docker cleanup requires dedicated scope-specific confirmation"),
                 "Expected Docker security policy error, got: {}",
                 err.error_message
             );

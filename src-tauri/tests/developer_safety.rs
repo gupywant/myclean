@@ -13,7 +13,10 @@ fn test_xcode_provider_rejects_paths_outside_derived_data() {
     let home = dirs::home_dir().unwrap();
 
     // Target a personal document or arbitrary file
-    let fake_target = home.join("Documents/MyProject").to_string_lossy().to_string();
+    let fake_target = home
+        .join("Documents/MyProject")
+        .to_string_lossy()
+        .to_string();
     let res = provider.validate(&[fake_target]);
     assert!(res.is_err(), "Must reject path outside DerivedData");
     match res.unwrap_err() {
@@ -70,7 +73,10 @@ fn test_npm_provider_restricts_to_cacache() {
     let metrics_path = npm_root.join("anonymous-cli-metrics.json");
     let _ = fs::write(&metrics_path, "{}");
     let res = provider.validate(&[metrics_path.to_string_lossy().to_string()]);
-    assert!(res.is_err(), "Must restrict npm provider strictly to _cacache");
+    assert!(
+        res.is_err(),
+        "Must restrict npm provider strictly to _cacache"
+    );
 }
 
 #[test]
@@ -87,7 +93,10 @@ fn test_workspace_target_requires_cargo_toml_manifest() {
 
     // Without Cargo.toml, verification must fail
     let res = WorkspaceArtifactsProvider::verify_workspace_artifact(&target_dir);
-    assert!(res.is_err(), "Folder named target without Cargo.toml must be rejected");
+    assert!(
+        res.is_err(),
+        "Folder named target without Cargo.toml must be rejected"
+    );
     if let Err(SafetyError::UserProtected(msg)) = res {
         assert!(msg.contains("Cargo.toml"));
     } else {
@@ -97,7 +106,10 @@ fn test_workspace_target_requires_cargo_toml_manifest() {
     // Now add Cargo.toml
     fs::write(temp.join("Cargo.toml"), "[package]\nname = \"dummy\"\n").unwrap();
     let res_ok = WorkspaceArtifactsProvider::verify_workspace_artifact(&target_dir);
-    assert!(res_ok.is_ok(), "With Cargo.toml, target/ must be verified successfully");
+    assert!(
+        res_ok.is_ok(),
+        "With Cargo.toml, target/ must be verified successfully"
+    );
 
     let _ = fs::remove_dir_all(&temp);
 }
@@ -116,7 +128,10 @@ fn test_workspace_node_modules_requires_package_json_manifest() {
 
     // Without package.json, verification must fail
     let res = WorkspaceArtifactsProvider::verify_workspace_artifact(&nm_dir);
-    assert!(res.is_err(), "Folder named node_modules without package.json must be rejected");
+    assert!(
+        res.is_err(),
+        "Folder named node_modules without package.json must be rejected"
+    );
     if let Err(SafetyError::UserProtected(msg)) = res {
         assert!(msg.contains("package.json"));
     } else {
@@ -126,7 +141,10 @@ fn test_workspace_node_modules_requires_package_json_manifest() {
     // Now add package.json
     fs::write(temp.join("package.json"), "{\"name\":\"dummy\"}").unwrap();
     let res_ok = WorkspaceArtifactsProvider::verify_workspace_artifact(&nm_dir);
-    assert!(res_ok.is_ok(), "With package.json, node_modules/ must be verified successfully");
+    assert!(
+        res_ok.is_ok(),
+        "With package.json, node_modules/ must be verified successfully"
+    );
 
     let _ = fs::remove_dir_all(&temp);
 }
@@ -180,5 +198,8 @@ fn test_developer_dry_run_preserves_files() {
 fn test_developer_scan_cancellation() {
     let cancel = AtomicBool::new(true); // Pre-cancelled
     let res = DeveloperEngine::scan_all(None, &cancel).expect("Scan should complete quickly");
-    assert!(res.items.is_empty(), "Cancelled scan should abort traversal");
+    assert!(
+        res.items.is_empty(),
+        "Cancelled scan should abort traversal"
+    );
 }

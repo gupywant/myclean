@@ -258,7 +258,9 @@ impl<F: Fn(ScanProgress) + Send + Sync> ProgressEmitter<F> {
         let overall = if is_final {
             100.0
         } else {
-            overall_progress_raw.max(self.last_overall_progress).min(99.9)
+            overall_progress_raw
+                .max(self.last_overall_progress)
+                .min(99.9)
         };
         self.last_overall_progress = overall;
         self.last_emit = now;
@@ -316,12 +318,7 @@ impl<F: Fn(ScanProgress) + Send + Sync> ProgressEmitter<F> {
         );
     }
 
-    fn emit_final(
-        &mut self,
-        category_id: &str,
-        category_name: &str,
-        phase: &str,
-    ) {
+    fn emit_final(&mut self, category_id: &str, category_name: &str, phase: &str) {
         self.emit_internal(
             category_id,
             category_name,
@@ -343,7 +340,14 @@ impl Scanner {
     pub fn classify_candidate_rule(
         category: ScanCategory,
         path: &Path,
-    ) -> (String, String, RiskClassification, bool, Option<String>, Option<String>) {
+    ) -> (
+        String,
+        String,
+        RiskClassification,
+        bool,
+        Option<String>,
+        Option<String>,
+    ) {
         // 1. Mandatory safety exclusion check
         if SafetyGuard::is_mandatory_exclusion(path) {
             return (
@@ -363,7 +367,10 @@ impl Scanner {
                 "Contains persistent database, login credentials, or user preferences.".into(),
                 RiskClassification::Protected,
                 false,
-                Some("Persistent database or preference store cannot be automatically cleaned".into()),
+                Some(
+                    "Persistent database or preference store cannot be automatically cleaned"
+                        .into(),
+                ),
                 None,
             );
         }
@@ -530,7 +537,9 @@ impl Scanner {
                 Err(e) => {
                     metrics.skipped_count.fetch_add(1, Ordering::Relaxed);
                     if e.kind() == std::io::ErrorKind::PermissionDenied {
-                        metrics.permission_denied_count.fetch_add(1, Ordering::Relaxed);
+                        metrics
+                            .permission_denied_count
+                            .fetch_add(1, Ordering::Relaxed);
                     }
                     skipped_paths.push(SkippedPath {
                         path: path_str.to_string(),
@@ -562,7 +571,9 @@ impl Scanner {
             Err(e) => {
                 metrics.skipped_count.fetch_add(1, Ordering::Relaxed);
                 if e.kind() == std::io::ErrorKind::PermissionDenied {
-                    metrics.permission_denied_count.fetch_add(1, Ordering::Relaxed);
+                    metrics
+                        .permission_denied_count
+                        .fetch_add(1, Ordering::Relaxed);
                 }
                 skipped_paths.push(SkippedPath {
                     path: path_str.to_string(),
@@ -572,7 +583,9 @@ impl Scanner {
             }
         };
         let root_dev = root_meta.dev();
-        metrics.directories_inspected.fetch_add(1, Ordering::Relaxed);
+        metrics
+            .directories_inspected
+            .fetch_add(1, Ordering::Relaxed);
 
         let mut total_allocated = 0u64;
         let mut total_logical = 0u64;
@@ -582,9 +595,7 @@ impl Scanner {
         let walker = WalkDir::new(p)
             .follow_links(false)
             .into_iter()
-            .filter_entry(|entry| {
-                !SafetyGuard::is_mandatory_exclusion(entry.path())
-            });
+            .filter_entry(|entry| !SafetyGuard::is_mandatory_exclusion(entry.path()));
 
         for entry_res in walker {
             if cancel_token.load(Ordering::Relaxed) {
@@ -597,9 +608,14 @@ impl Scanner {
                     metrics.skipped_count.fetch_add(1, Ordering::Relaxed);
                     let err_str = err.to_string();
                     if err_str.contains("Permission denied") {
-                        metrics.permission_denied_count.fetch_add(1, Ordering::Relaxed);
+                        metrics
+                            .permission_denied_count
+                            .fetch_add(1, Ordering::Relaxed);
                     }
-                    let err_path = err.path().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+                    let err_path = err
+                        .path()
+                        .map(|p| p.to_string_lossy().to_string())
+                        .unwrap_or_default();
                     skipped_paths.push(SkippedPath {
                         path: err_path,
                         reason: err_str,
@@ -619,7 +635,9 @@ impl Scanner {
                     metrics.skipped_count.fetch_add(1, Ordering::Relaxed);
                     let err_str = err.to_string();
                     if err_str.contains("Permission denied") {
-                        metrics.permission_denied_count.fetch_add(1, Ordering::Relaxed);
+                        metrics
+                            .permission_denied_count
+                            .fetch_add(1, Ordering::Relaxed);
                     }
                     skipped_paths.push(SkippedPath {
                         path: ep.to_string_lossy().to_string(),
@@ -635,14 +653,18 @@ impl Scanner {
             }
 
             if meta.file_type().is_dir() {
-                metrics.directories_inspected.fetch_add(1, Ordering::Relaxed);
+                metrics
+                    .directories_inspected
+                    .fetch_add(1, Ordering::Relaxed);
                 continue;
             }
 
             // If symlink, record size of the link itself, never follow external path
             if meta.file_type().is_symlink() {
                 metrics.files_inspected.fetch_add(1, Ordering::Relaxed);
-                metrics.bytes_analyzed.fetch_add(meta.len(), Ordering::Relaxed);
+                metrics
+                    .bytes_analyzed
+                    .fetch_add(meta.len(), Ordering::Relaxed);
                 total_allocated += meta.blocks() * 512;
                 total_logical += meta.len();
                 file_count += 1;
@@ -652,7 +674,9 @@ impl Scanner {
 
             if meta.is_file() {
                 metrics.files_inspected.fetch_add(1, Ordering::Relaxed);
-                metrics.bytes_analyzed.fetch_add(meta.len(), Ordering::Relaxed);
+                metrics
+                    .bytes_analyzed
+                    .fetch_add(meta.len(), Ordering::Relaxed);
                 let dev = meta.dev();
                 let ino = meta.ino();
                 let nlink = meta.nlink();
@@ -918,9 +942,12 @@ impl Scanner {
                         let now = Instant::now();
                         if now.duration_since(last_walk_emit).as_millis() >= 40 {
                             last_walk_emit = now;
-                            let intra_target = (local_files as f32 / (local_files as f32 + 150.0)).min(0.85);
-                            let intra_cat_prog = ((k as f32 + intra_target) / total_targets as f32) * 100.0;
-                            let intra_overall = base_overall + (intra_cat_prog / 100.0 * stage_weight);
+                            let intra_target =
+                                (local_files as f32 / (local_files as f32 + 150.0)).min(0.85);
+                            let intra_cat_prog =
+                                ((k as f32 + intra_target) / total_targets as f32) * 100.0;
+                            let intra_overall =
+                                base_overall + (intra_cat_prog / 100.0 * stage_weight);
 
                             emitter.emit(
                                 stage_id,
@@ -1021,7 +1048,9 @@ impl Scanner {
             if let Ok(entries) = fs::read_dir(&sys_caches) {
                 for entry in entries.flatten() {
                     let p = entry.path();
-                    if !SafetyGuard::is_mandatory_exclusion(&p) && !Self::is_path_overlapping(&p, &visited_paths) {
+                    if !SafetyGuard::is_mandatory_exclusion(&p)
+                        && !Self::is_path_overlapping(&p, &visited_paths)
+                    {
                         visited_paths.insert(p.clone());
                         stage0_targets.push((ScanCategory::SystemCaches, p, "System Cache Buffer"));
                     }
@@ -1029,13 +1058,24 @@ impl Scanner {
             }
         }
         let sys_updates = PathBuf::from("/Library/Updates");
-        if sys_updates.exists() && !SafetyGuard::is_mandatory_exclusion(&sys_updates) && !Self::is_path_overlapping(&sys_updates, &visited_paths) {
+        if sys_updates.exists()
+            && !SafetyGuard::is_mandatory_exclusion(&sys_updates)
+            && !Self::is_path_overlapping(&sys_updates, &visited_paths)
+        {
             visited_paths.insert(sys_updates.clone());
-            stage0_targets.push((ScanCategory::SystemCaches, sys_updates, "System Software Update Cache"));
+            stage0_targets.push((
+                ScanCategory::SystemCaches,
+                sys_updates,
+                "System Software Update Cache",
+            ));
         }
         for custom in &config.custom_paths {
             let cp = PathBuf::from(custom);
-            if cp.exists() && !SafetyGuard::is_mandatory_exclusion(&cp) && !cp.starts_with(&home) && !Self::is_path_overlapping(&cp, &visited_paths) {
+            if cp.exists()
+                && !SafetyGuard::is_mandatory_exclusion(&cp)
+                && !cp.starts_with(&home)
+                && !Self::is_path_overlapping(&cp, &visited_paths)
+            {
                 visited_paths.insert(cp.clone());
                 stage0_targets.push((ScanCategory::SystemCaches, cp, "Custom System Path"));
             }
@@ -1086,7 +1126,11 @@ impl Scanner {
                             || name.contains("cargo")
                             || name.contains("JetBrains");
 
-                        if !is_browser && !is_msg && !is_dev && !Self::is_path_overlapping(&path, &visited_paths) {
+                        if !is_browser
+                            && !is_msg
+                            && !is_dev
+                            && !Self::is_path_overlapping(&path, &visited_paths)
+                        {
                             visited_paths.insert(path.clone());
                             stage1_targets.push((
                                 ScanCategory::SystemCaches,
@@ -1131,14 +1175,20 @@ impl Scanner {
                                 || name.contains("Signal")
                                 || name.contains("WeChat");
 
-                            if is_browser && config.include_browser_caches && !Self::is_path_overlapping(&path, &visited_paths) {
+                            if is_browser
+                                && config.include_browser_caches
+                                && !Self::is_path_overlapping(&path, &visited_paths)
+                            {
                                 visited_paths.insert(path.clone());
                                 stage2_targets.push((
                                     ScanCategory::BrowserCaches,
                                     path,
                                     "Browser Web Cache",
                                 ));
-                            } else if is_msg && config.include_messaging_caches && !Self::is_path_overlapping(&path, &visited_paths) {
+                            } else if is_msg
+                                && config.include_messaging_caches
+                                && !Self::is_path_overlapping(&path, &visited_paths)
+                            {
                                 visited_paths.insert(path.clone());
                                 stage2_targets.push((
                                     ScanCategory::MessagingCaches,
@@ -1150,9 +1200,11 @@ impl Scanner {
                     }
                 }
                 if config.include_mail_downloads {
-                    let mail_downloads = home
-                        .join("Library/Containers/com.apple.mail/Data/Library/Mail Downloads");
-                    if mail_downloads.exists() && !Self::is_path_overlapping(&mail_downloads, &visited_paths) {
+                    let mail_downloads =
+                        home.join("Library/Containers/com.apple.mail/Data/Library/Mail Downloads");
+                    if mail_downloads.exists()
+                        && !Self::is_path_overlapping(&mail_downloads, &visited_paths)
+                    {
                         visited_paths.insert(mail_downloads.clone());
                         stage2_targets.push((
                             ScanCategory::MailDownloads,
@@ -1173,7 +1225,9 @@ impl Scanner {
                     let mut stage3_targets = Vec::new();
                     if config.include_developer_xcode {
                         let xcode_derived = home.join("Library/Developer/Xcode/DerivedData");
-                        if xcode_derived.exists() && !Self::is_path_overlapping(&xcode_derived, &visited_paths) {
+                        if xcode_derived.exists()
+                            && !Self::is_path_overlapping(&xcode_derived, &visited_paths)
+                        {
                             visited_paths.insert(xcode_derived.clone());
                             stage3_targets.push((
                                 ScanCategory::DeveloperXcode,
@@ -1182,7 +1236,9 @@ impl Scanner {
                             ));
                         }
                         let xcode_archives = home.join("Library/Developer/Xcode/Archives");
-                        if xcode_archives.exists() && !Self::is_path_overlapping(&xcode_archives, &visited_paths) {
+                        if xcode_archives.exists()
+                            && !Self::is_path_overlapping(&xcode_archives, &visited_paths)
+                        {
                             visited_paths.insert(xcode_archives.clone());
                             stage3_targets.push((
                                 ScanCategory::DeveloperXcode,
@@ -1191,7 +1247,9 @@ impl Scanner {
                             ));
                         }
                         let xcode_device = home.join("Library/Developer/Xcode/iOS DeviceSupport");
-                        if xcode_device.exists() && !Self::is_path_overlapping(&xcode_device, &visited_paths) {
+                        if xcode_device.exists()
+                            && !Self::is_path_overlapping(&xcode_device, &visited_paths)
+                        {
                             visited_paths.insert(xcode_device.clone());
                             stage3_targets.push((
                                 ScanCategory::DeveloperXcode,
@@ -1203,15 +1261,24 @@ impl Scanner {
 
                     if config.include_developer_caches {
                         let dev_paths = [
-                            (home.join(".cargo/registry/cache"), "Rust Cargo Registry .crate Archives"),
+                            (
+                                home.join(".cargo/registry/cache"),
+                                "Rust Cargo Registry .crate Archives",
+                            ),
                             (home.join(".cargo/cache"), "Rust Cargo Cache"),
                             (home.join(".gradle/caches"), "Gradle Dependency Caches"),
-                            (home.join("Library/Caches/CocoaPods"), "CocoaPods Specs & Pod Archives"),
+                            (
+                                home.join("Library/Caches/CocoaPods"),
+                                "CocoaPods Specs & Pod Archives",
+                            ),
                             (home.join("Library/Caches/Yarn"), "Yarn Package Cache"),
                             (home.join(".cache/yarn"), "Yarn Global Cache"),
                             (home.join(".npm/_cacache"), "NPM Package Cache"),
                             (home.join("Library/pnpm/store"), "pnpm Store Cache"),
-                            (home.join("Library/Caches/Homebrew"), "Homebrew Formula & Bottle Caches"),
+                            (
+                                home.join("Library/Caches/Homebrew"),
+                                "Homebrew Formula & Bottle Caches",
+                            ),
                         ];
                         for (p, desc) in dev_paths {
                             if p.exists() && !Self::is_path_overlapping(&p, &visited_paths) {
@@ -1235,20 +1302,29 @@ impl Scanner {
                             if let Ok(entries) = fs::read_dir(&user_logs) {
                                 for entry in entries.flatten() {
                                     let p = entry.path();
-                                    if !SafetyGuard::is_mandatory_exclusion(&p) && !Self::is_path_overlapping(&p, &visited_paths) {
+                                    if !SafetyGuard::is_mandatory_exclusion(&p)
+                                        && !Self::is_path_overlapping(&p, &visited_paths)
+                                    {
                                         visited_paths.insert(p.clone());
                                         let desc = if p.ends_with("DiagnosticReports") {
                                             "System Diagnostic & Crash Reports"
                                         } else {
                                             "User Application Logs"
                                         };
-                                        stage4_targets.push((ScanCategory::ApplicationLogs, p, desc));
+                                        stage4_targets.push((
+                                            ScanCategory::ApplicationLogs,
+                                            p,
+                                            desc,
+                                        ));
                                     }
                                 }
                             }
                         }
                         let sys_diag = PathBuf::from("/Library/Logs/DiagnosticReports");
-                        if sys_diag.exists() && !SafetyGuard::is_mandatory_exclusion(&sys_diag) && !Self::is_path_overlapping(&sys_diag, &visited_paths) {
+                        if sys_diag.exists()
+                            && !SafetyGuard::is_mandatory_exclusion(&sys_diag)
+                            && !Self::is_path_overlapping(&sys_diag, &visited_paths)
+                        {
                             visited_paths.insert(sys_diag.clone());
                             stage4_targets.push((
                                 ScanCategory::ApplicationLogs,
@@ -1381,7 +1457,8 @@ impl Scanner {
                                             "Docker daemon is not running (skipped safely)"
                                         };
                                         completed_enabled_stages += 1;
-                                        let new_overall = completed_enabled_stages as f32 * stage_weight;
+                                        let new_overall =
+                                            completed_enabled_stages as f32 * stage_weight;
                                         emitter.emit(
                                             "docker",
                                             "Docker Resources",
@@ -1436,7 +1513,8 @@ impl Scanner {
                                                 };
                                                 emitter.review_items_count += 1;
                                                 emitter.discovered_items += 1;
-                                                emitter.discovered_bytes += dres.summary.images_reclaimable_bytes;
+                                                emitter.discovered_bytes +=
+                                                    dres.summary.images_reclaimable_bytes;
                                                 items_collector.lock().unwrap().push(item);
                                             }
 
@@ -1464,13 +1542,15 @@ impl Scanner {
                                                 };
                                                 emitter.review_items_count += 1;
                                                 emitter.discovered_items += 1;
-                                                emitter.discovered_bytes += dres.summary.build_cache_reclaimable_bytes;
+                                                emitter.discovered_bytes +=
+                                                    dres.summary.build_cache_reclaimable_bytes;
                                                 items_collector.lock().unwrap().push(item);
                                             }
                                         }
 
                                         completed_enabled_stages += 1;
-                                        let new_overall = completed_enabled_stages as f32 * stage_weight;
+                                        let new_overall =
+                                            completed_enabled_stages as f32 * stage_weight;
                                         emitter.emit(
                                             "docker",
                                             "Docker Resources",
@@ -1518,14 +1598,13 @@ impl Scanner {
                 _ => "System Cache",
             };
 
-            emitter.emit_final(
-                last_category_id,
-                last_category_name,
-                "Analysis Complete",
-            );
+            emitter.emit_final(last_category_id, last_category_name, "Analysis Complete");
         }
 
-        let mut items = Arc::try_unwrap(items_collector).unwrap().into_inner().unwrap();
+        let mut items = Arc::try_unwrap(items_collector)
+            .unwrap()
+            .into_inner()
+            .unwrap();
         items.sort_by_key(|a| std::cmp::Reverse(a.size_bytes));
 
         let total_bytes = items.iter().map(|i| i.size_bytes).sum();
@@ -1562,7 +1641,10 @@ impl Scanner {
             }
         }
 
-        let skipped_paths = Arc::try_unwrap(skipped_collector).unwrap().into_inner().unwrap();
+        let skipped_paths = Arc::try_unwrap(skipped_collector)
+            .unwrap()
+            .into_inner()
+            .unwrap();
 
         ScanResult {
             duration_ms: start_time.elapsed().as_millis() as u64,
@@ -1614,7 +1696,11 @@ mod tests {
         let cancel_clone = cancel.clone();
 
         let result = Scanner::scan(cancel_clone, |_prog| {});
-        println!("Scan complete: found {} items, {} MB", result.total_items, result.total_bytes / (1024 * 1024));
+        println!(
+            "Scan complete: found {} items, {} MB",
+            result.total_items,
+            result.total_bytes / (1024 * 1024)
+        );
         assert!(result.duration_ms > 0);
     }
 
@@ -1682,13 +1768,8 @@ mod tests {
         let mut visited = HashSet::new();
         let mut skipped = Vec::new();
         let cancel = AtomicBool::new(false);
-        let (alloc, logical, count) = Scanner::measure_path_detailed(
-            &temp,
-            &mut visited,
-            &mut skipped,
-            &[],
-            &cancel,
-        );
+        let (alloc, logical, count) =
+            Scanner::measure_path_detailed(&temp, &mut visited, &mut skipped, &[], &cancel);
 
         assert!(alloc > 0);
         assert_eq!(logical, 1024);
@@ -1704,9 +1785,15 @@ mod tests {
             Scanner::classify_candidate_rule(ScanCategory::Docker, path);
         assert_eq!(rule_id, "RULE_DOCKER_CLUTTER");
         assert_eq!(risk, RiskClassification::ReviewRequired);
-        assert!(!eligible, "Docker clutter must be marked ineligible for generic cleaner");
         assert!(
-            inelig_reason.as_deref().unwrap_or_default().contains("Docker Studio"),
+            !eligible,
+            "Docker clutter must be marked ineligible for generic cleaner"
+        );
+        assert!(
+            inelig_reason
+                .as_deref()
+                .unwrap_or_default()
+                .contains("Docker Studio"),
             "Expected ineligibility reason mentioning Docker Studio"
         );
         assert_eq!(app, Some("Docker".into()));
@@ -1719,17 +1806,35 @@ mod tests {
         visited.insert(PathBuf::from("/Users/user/Library/Logs"));
 
         // Exact match
-        assert!(Scanner::is_path_overlapping(Path::new("/Users/user/Library/Caches/Google"), &visited));
+        assert!(Scanner::is_path_overlapping(
+            Path::new("/Users/user/Library/Caches/Google"),
+            &visited
+        ));
 
         // Child of visited
-        assert!(Scanner::is_path_overlapping(Path::new("/Users/user/Library/Caches/Google/Chrome/Cache"), &visited));
-        assert!(Scanner::is_path_overlapping(Path::new("/Users/user/Library/Logs/DiagnosticReports"), &visited));
+        assert!(Scanner::is_path_overlapping(
+            Path::new("/Users/user/Library/Caches/Google/Chrome/Cache"),
+            &visited
+        ));
+        assert!(Scanner::is_path_overlapping(
+            Path::new("/Users/user/Library/Logs/DiagnosticReports"),
+            &visited
+        ));
 
         // Parent of visited (covering it)
-        assert!(Scanner::is_path_overlapping(Path::new("/Users/user/Library/Caches"), &visited));
+        assert!(Scanner::is_path_overlapping(
+            Path::new("/Users/user/Library/Caches"),
+            &visited
+        ));
 
         // Non-overlapping sibling
-        assert!(!Scanner::is_path_overlapping(Path::new("/Users/user/Library/Caches/Spotify"), &visited));
-        assert!(!Scanner::is_path_overlapping(Path::new("/Users/user/Downloads/file.zip"), &visited));
+        assert!(!Scanner::is_path_overlapping(
+            Path::new("/Users/user/Library/Caches/Spotify"),
+            &visited
+        ));
+        assert!(!Scanner::is_path_overlapping(
+            Path::new("/Users/user/Downloads/file.zip"),
+            &visited
+        ));
     }
 }

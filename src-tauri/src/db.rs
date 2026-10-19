@@ -39,21 +39,21 @@ pub struct WhitelistEntry {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppPreferences {
-    pub theme: String, // "dark" | "light" | "system"
-    pub accent_color: String, // "violet" | "cyan" | "indigo"
+    pub theme: String,               // "dark" | "light" | "system"
+    pub accent_color: String,        // "violet" | "cyan" | "indigo"
     pub animation_intensity: String, // "full" | "reduced" | "off"
     pub dry_run_default: bool,
     pub move_to_trash_only: bool, // always true, cannot be disabled
     pub confirm_before_cleanup: bool,
-    pub large_file_threshold_mb: u64, // default 100
+    pub large_file_threshold_mb: u64,       // default 100
     pub low_disk_warning_threshold_gb: u64, // default 15
-    pub history_retention: String, // "30_days" | "90_days" | "180_days" | "forever"
+    pub history_retention: String,          // "30_days" | "90_days" | "180_days" | "forever"
     pub notify_scan_complete: bool,
     pub notify_clean_complete: bool,
     pub notify_clean_failure: bool,
     pub notify_low_disk_space: bool,
     pub scan_reminder_interval: String, // "off" | "daily" | "weekly" | "monthly"
-    pub cpu_thread_limit: u32, // 0 for all
+    pub cpu_thread_limit: u32,          // 0 for all
     pub default_categories: Vec<String>,
     pub developer_workspaces: Vec<String>,
 }
@@ -242,7 +242,9 @@ impl Database {
     fn init_schema(&self) -> SqlResult<()> {
         let conn = self.conn.lock().unwrap();
 
-        let version: u32 = conn.query_row("PRAGMA user_version;", [], |row| row.get(0)).unwrap_or(0);
+        let version: u32 = conn
+            .query_row("PRAGMA user_version;", [], |row| row.get(0))
+            .unwrap_or(0);
 
         if version < 1 {
             conn.execute(
@@ -417,7 +419,8 @@ impl Database {
 
     pub fn get_whitelist(&self) -> SqlResult<Vec<WhitelistEntry>> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT id, path, reason, added_at FROM whitelist ORDER BY id ASC;")?;
+        let mut stmt =
+            conn.prepare("SELECT id, path, reason, added_at FROM whitelist ORDER BY id ASC;")?;
         let rows = stmt.query_map([], |row| {
             Ok(WhitelistEntry {
                 id: Some(row.get(0)?),
@@ -440,7 +443,9 @@ impl Database {
             Ok(c) => c,
             Err(_) => return false,
         };
-        let mut stmt = match conn.prepare("SELECT 1 FROM whitelist WHERE ?1 = path OR ?1 LIKE (path || '/%') LIMIT 1;") {
+        let mut stmt = match conn
+            .prepare("SELECT 1 FROM whitelist WHERE ?1 = path OR ?1 LIKE (path || '/%') LIMIT 1;")
+        {
             Ok(s) => s,
             Err(_) => return false,
         };
@@ -516,7 +521,11 @@ impl Database {
                 category: item.category,
                 reason: item.explanation,
                 is_mandatory: true,
-                source: if item.is_system_level { "system".into() } else { "user_identity".into() },
+                source: if item.is_system_level {
+                    "system".into()
+                } else {
+                    "user_identity".into()
+                },
                 added_at: "Permanent".into(),
             });
         }
@@ -538,9 +547,13 @@ impl Database {
         Ok(descriptors)
     }
 
-    pub fn add_custom_exclusion(&self, path: &str, reason: &str) -> Result<ExclusionDescriptor, String> {
-        let target = SafetyGuard::validate_custom_exclusion_candidate(path)
-            .map_err(|e| e.to_string())?;
+    pub fn add_custom_exclusion(
+        &self,
+        path: &str,
+        reason: &str,
+    ) -> Result<ExclusionDescriptor, String> {
+        let target =
+            SafetyGuard::validate_custom_exclusion_candidate(path).map_err(|e| e.to_string())?;
 
         let path_str = target.to_string_lossy().to_string();
         let final_reason = if reason.trim().is_empty() {
@@ -549,7 +562,8 @@ impl Database {
             reason.trim().to_string()
         };
 
-        self.add_whitelist(&path_str, &final_reason).map_err(|e| e.to_string())?;
+        self.add_whitelist(&path_str, &final_reason)
+            .map_err(|e| e.to_string())?;
 
         Ok(ExclusionDescriptor {
             id: None,
@@ -575,7 +589,10 @@ impl Database {
     // Phase 08 Advanced History & Analytics
     // -----------------------------------------------------------------------
 
-    pub fn query_cleanup_history(&self, req: HistoryQueryRequest) -> SqlResult<HistoryQueryResponse> {
+    pub fn query_cleanup_history(
+        &self,
+        req: HistoryQueryRequest,
+    ) -> SqlResult<HistoryQueryResponse> {
         let conn = self.conn.lock().unwrap();
 
         let mut query = "SELECT id, timestamp, bytes_freed, items_deleted, method, details_json FROM cleanup_history WHERE 1=1".to_string();
@@ -626,9 +643,13 @@ impl Database {
 
         for r in rows {
             let record = r?;
-            let val: serde_json::Value = serde_json::from_str(&record.details_json).unwrap_or_default();
+            let val: serde_json::Value =
+                serde_json::from_str(&record.details_json).unwrap_or_default();
 
-            let is_dry_run = val.get("dry_run").and_then(|v| v.as_bool()).unwrap_or(false)
+            let is_dry_run = val
+                .get("dry_run")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
                 || record.method.contains("dry_run");
 
             if let Some(dry_filter) = req.dry_run_only {
@@ -637,7 +658,11 @@ impl Database {
                 }
             }
 
-            let has_docker_types = val.get("resource_types").and_then(|v| v.as_array()).map(|a| !a.is_empty()).unwrap_or(false);
+            let has_docker_types = val
+                .get("resource_types")
+                .and_then(|v| v.as_array())
+                .map(|a| !a.is_empty())
+                .unwrap_or(false);
             let has_developer_provider = val.get("provider_id").and_then(|v| v.as_str()).is_some();
 
             let (category, source) = if record.method.contains("docker") || has_docker_types {
@@ -673,11 +698,20 @@ impl Database {
                 }
             }
 
-            let items_skipped = val.get("items_skipped").and_then(|v| v.as_u64()).map(|n| n as usize).unwrap_or(0);
-            let items_failed = val.get("items_failed")
+            let items_skipped = val
+                .get("items_skipped")
                 .and_then(|v| v.as_u64())
                 .map(|n| n as usize)
-                .or_else(|| val.get("errors").and_then(|v| v.as_array()).map(|a| a.len()))
+                .unwrap_or(0);
+            let items_failed = val
+                .get("items_failed")
+                .and_then(|v| v.as_u64())
+                .map(|n| n as usize)
+                .or_else(|| {
+                    val.get("errors")
+                        .and_then(|v| v.as_array())
+                        .map(|a| a.len())
+                })
                 .unwrap_or(0);
 
             let status = if items_failed > 0 && record.items_deleted == 0 {
@@ -688,7 +722,8 @@ impl Database {
                 "success".to_string()
             };
 
-            let error_summary = val.get("errors")
+            let error_summary = val
+                .get("errors")
                 .and_then(|e| e.as_array())
                 .and_then(|arr| arr.first())
                 .and_then(|first| first.get("error_message").or_else(|| first.get("error")))
@@ -726,7 +761,11 @@ impl Database {
         }
 
         let total_count = all_items.len();
-        let page_size = if req.page_size == 0 { 20 } else { req.page_size };
+        let page_size = if req.page_size == 0 {
+            20
+        } else {
+            req.page_size
+        };
         let total_pages = total_count.div_ceil(page_size);
         let current_page = if req.page == 0 { 1 } else { req.page };
 
@@ -758,13 +797,19 @@ impl Database {
         let mut developer_bytes_moved = 0;
         let mut docker_bytes_reclaimed = 0;
 
-        let mut category_map: std::collections::HashMap<String, (u64, usize)> = std::collections::HashMap::new();
-        let mut trend_map: std::collections::BTreeMap<String, (u64, usize)> = std::collections::BTreeMap::new();
+        let mut category_map: std::collections::HashMap<String, (u64, usize)> =
+            std::collections::HashMap::new();
+        let mut trend_map: std::collections::BTreeMap<String, (u64, usize)> =
+            std::collections::BTreeMap::new();
 
         for record in history {
             total_operations += 1;
-            let val: serde_json::Value = serde_json::from_str(&record.details_json).unwrap_or_default();
-            let is_dry_run = val.get("dry_run").and_then(|v| v.as_bool()).unwrap_or(false)
+            let val: serde_json::Value =
+                serde_json::from_str(&record.details_json).unwrap_or_default();
+            let is_dry_run = val
+                .get("dry_run")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
                 || record.method.contains("dry_run");
 
             if is_dry_run {
@@ -772,7 +817,11 @@ impl Database {
                 continue;
             }
 
-            let has_docker_types = val.get("resource_types").and_then(|v| v.as_array()).map(|a| !a.is_empty()).unwrap_or(false);
+            let has_docker_types = val
+                .get("resource_types")
+                .and_then(|v| v.as_array())
+                .map(|a| !a.is_empty())
+                .unwrap_or(false);
             let has_developer_provider = val.get("provider_id").and_then(|v| v.as_str()).is_some();
 
             let cat = if record.method.contains("docker") || has_docker_types {
@@ -813,16 +862,22 @@ impl Database {
 
         let storage_by_category = category_map
             .into_iter()
-            .map(|(category, (bytes, items))| CategoryStorageMetric { category, bytes, items })
+            .map(|(category, (bytes, items))| CategoryStorageMetric {
+                category,
+                bytes,
+                items,
+            })
             .collect();
 
         let daily_trends = trend_map
             .into_iter()
-            .map(|(date, (bytes_moved_to_trash, operations))| DailyTrendMetric {
-                date,
-                bytes_moved_to_trash,
-                operations,
-            })
+            .map(
+                |(date, (bytes_moved_to_trash, operations))| DailyTrendMetric {
+                    date,
+                    bytes_moved_to_trash,
+                    operations,
+                },
+            )
             .collect();
 
         Ok(CleanupAnalyticsSummary {
@@ -839,13 +894,25 @@ impl Database {
 
     pub fn check_database_integrity(&self) -> SqlResult<DatabaseHealthReport> {
         let conn = self.conn.lock().unwrap();
-        let integrity_status: String = conn.query_row("PRAGMA integrity_check(1);", [], |row| row.get(0)).unwrap_or_else(|_| "error".into());
+        let integrity_status: String = conn
+            .query_row("PRAGMA integrity_check(1);", [], |row| row.get(0))
+            .unwrap_or_else(|_| "error".into());
         let is_healthy = integrity_status == "ok";
 
-        let schema_version: u32 = conn.query_row("PRAGMA user_version;", [], |row| row.get(0)).unwrap_or(0);
-        let total_cleanup_records: usize = conn.query_row("SELECT COUNT(*) FROM cleanup_history;", [], |row| row.get(0)).unwrap_or(0);
-        let total_scan_records: usize = conn.query_row("SELECT COUNT(*) FROM scan_history;", [], |row| row.get(0)).unwrap_or(0);
-        let total_exclusions: usize = conn.query_row("SELECT COUNT(*) FROM whitelist;", [], |row| row.get(0)).unwrap_or(0);
+        let schema_version: u32 = conn
+            .query_row("PRAGMA user_version;", [], |row| row.get(0))
+            .unwrap_or(0);
+        let total_cleanup_records: usize = conn
+            .query_row("SELECT COUNT(*) FROM cleanup_history;", [], |row| {
+                row.get(0)
+            })
+            .unwrap_or(0);
+        let total_scan_records: usize = conn
+            .query_row("SELECT COUNT(*) FROM scan_history;", [], |row| row.get(0))
+            .unwrap_or(0);
+        let total_exclusions: usize = conn
+            .query_row("SELECT COUNT(*) FROM whitelist;", [], |row| row.get(0))
+            .unwrap_or(0);
 
         let db_path = Self::get_db_path();
         let database_size_bytes = fs::metadata(&db_path).map(|m| m.len()).unwrap_or(0);
@@ -865,10 +932,17 @@ impl Database {
         if retention_days == 0 {
             return Ok(0); // 0 indicates Forever
         }
-        let cutoff = (chrono::Utc::now() - chrono::Duration::days(retention_days as i64)).to_rfc3339();
+        let cutoff =
+            (chrono::Utc::now() - chrono::Duration::days(retention_days as i64)).to_rfc3339();
         let conn = self.conn.lock().unwrap();
-        let count1 = conn.execute("DELETE FROM cleanup_history WHERE timestamp < ?1;", params![cutoff])?;
-        let count2 = conn.execute("DELETE FROM scan_history WHERE timestamp < ?1;", params![cutoff])?;
+        let count1 = conn.execute(
+            "DELETE FROM cleanup_history WHERE timestamp < ?1;",
+            params![cutoff],
+        )?;
+        let count2 = conn.execute(
+            "DELETE FROM scan_history WHERE timestamp < ?1;",
+            params![cutoff],
+        )?;
         Ok(count1 + count2)
     }
 
@@ -877,7 +951,8 @@ impl Database {
             return Err("Confirmation required to clear cleanup history".into());
         }
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        conn.execute("DELETE FROM cleanup_history;", []).map_err(|e| e.to_string())?;
+        conn.execute("DELETE FROM cleanup_history;", [])
+            .map_err(|e| e.to_string())?;
         let _ = conn.execute("VACUUM;", []);
         Ok(())
     }
@@ -887,7 +962,8 @@ impl Database {
             return Err("Confirmation required to clear scan history".into());
         }
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        conn.execute("DELETE FROM scan_history;", []).map_err(|e| e.to_string())?;
+        conn.execute("DELETE FROM scan_history;", [])
+            .map_err(|e| e.to_string())?;
         let _ = conn.execute("VACUUM;", []);
         Ok(())
     }
@@ -915,7 +991,8 @@ mod tests {
         assert_eq!(history.len(), 1);
         assert_eq!(history[0].total_bytes_found, 1048576);
 
-        db.add_whitelist("/Users/test/Code/keep_me", "Active project").unwrap();
+        db.add_whitelist("/Users/test/Code/keep_me", "Active project")
+            .unwrap();
         assert!(db.is_whitelisted("/Users/test/Code/keep_me"));
         assert!(db.is_whitelisted("/Users/test/Code/keep_me/subfolder/file.txt"));
         assert!(!db.is_whitelisted("/Users/test/Code/other"));
@@ -936,7 +1013,10 @@ mod tests {
         let updated = db.update_preferences(custom).unwrap();
         assert_eq!(updated.theme, "light");
         assert_eq!(updated.accent_color, "cyan");
-        assert!(updated.move_to_trash_only, "Trash safety MUST remain immutable");
+        assert!(
+            updated.move_to_trash_only,
+            "Trash safety MUST remain immutable"
+        );
 
         let re_fetched = db.get_preferences().unwrap();
         assert_eq!(re_fetched.theme, "light");

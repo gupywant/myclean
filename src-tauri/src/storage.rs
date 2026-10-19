@@ -45,15 +45,17 @@ impl FileTypeCategory {
         let e = ext.to_ascii_lowercase();
         match e.as_str() {
             "rs" | "ts" | "tsx" | "js" | "jsx" | "py" | "swift" | "c" | "cpp" | "h" | "hpp"
-            | "go" | "java" | "rb" | "php" | "json" | "yaml" | "yml" | "toml" | "lock"
-            | "o" | "a" | "dylib" | "sh" | "zsh" | "bash" | "html" | "css" | "scss" => {
+            | "go" | "java" | "rb" | "php" | "json" | "yaml" | "yml" | "toml" | "lock" | "o"
+            | "a" | "dylib" | "sh" | "zsh" | "bash" | "html" | "css" | "scss" => {
                 FileTypeCategory::Developer
             }
-            "mp4" | "mov" | "m4v" | "mkv" | "avi" | "mp3" | "wav" | "flac" | "aac"
-            | "png" | "jpg" | "jpeg" | "gif" | "heic" | "webp" | "svg" | "psd" | "ai"
-            | "tiff" | "bmp" => FileTypeCategory::Media,
-            "zip" | "tar" | "gz" | "tgz" | "bz2" | "7z" | "dmg" | "pkg" | "iso" | "xz"
-            | "rar" => FileTypeCategory::Archives,
+            "mp4" | "mov" | "m4v" | "mkv" | "avi" | "mp3" | "wav" | "flac" | "aac" | "png"
+            | "jpg" | "jpeg" | "gif" | "heic" | "webp" | "svg" | "psd" | "ai" | "tiff" | "bmp" => {
+                FileTypeCategory::Media
+            }
+            "zip" | "tar" | "gz" | "tgz" | "bz2" | "7z" | "dmg" | "pkg" | "iso" | "xz" | "rar" => {
+                FileTypeCategory::Archives
+            }
             "pdf" | "doc" | "docx" | "pages" | "xls" | "xlsx" | "numbers" | "ppt" | "pptx"
             | "key" | "txt" | "md" | "csv" | "rtf" | "epub" => FileTypeCategory::Documents,
             "cache" | "log" | "tmp" | "temp" | "bak" | "swp" | "ds_store" => {
@@ -186,7 +188,10 @@ impl StorageAnalyzer {
         let p = root_path.as_ref();
 
         if !p.exists() {
-            return Err(format!("Specified target path does not exist: {}", p.display()));
+            return Err(format!(
+                "Specified target path does not exist: {}",
+                p.display()
+            ));
         }
 
         let canonical = p.canonicalize().map_err(|e| e.to_string())?;
@@ -344,7 +349,8 @@ impl StorageAnalyzer {
         };
 
         // Classify node risk
-        let classification = if path_str.contains("/Library/Caches") || path_str.contains("/.Trash") {
+        let classification = if path_str.contains("/Library/Caches") || path_str.contains("/.Trash")
+        {
             RiskClassification::SafeToClean
         } else if SafetyGuard::is_mandatory_exclusion(path) {
             RiskClassification::Protected
@@ -399,9 +405,10 @@ impl StorageAnalyzer {
                 stat.1 += logical_to_add;
                 stat.2 += 1;
 
-                let modified_at = meta.modified().ok().map(|t| {
-                    chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339()
-                });
+                let modified_at = meta
+                    .modified()
+                    .ok()
+                    .map(|t| chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339());
 
                 largest_files.push(LargestItem {
                     path: path_str.clone(),
@@ -544,13 +551,34 @@ mod tests {
 
     #[test]
     fn test_file_type_categorization() {
-        assert_eq!(FileTypeCategory::from_extension("rs"), FileTypeCategory::Developer);
-        assert_eq!(FileTypeCategory::from_extension("TSX"), FileTypeCategory::Developer);
-        assert_eq!(FileTypeCategory::from_extension("mp4"), FileTypeCategory::Media);
-        assert_eq!(FileTypeCategory::from_extension("dmg"), FileTypeCategory::Archives);
-        assert_eq!(FileTypeCategory::from_extension("pdf"), FileTypeCategory::Documents);
-        assert_eq!(FileTypeCategory::from_extension("log"), FileTypeCategory::SystemCaches);
-        assert_eq!(FileTypeCategory::from_extension("unknown_ext_xyz"), FileTypeCategory::Other);
+        assert_eq!(
+            FileTypeCategory::from_extension("rs"),
+            FileTypeCategory::Developer
+        );
+        assert_eq!(
+            FileTypeCategory::from_extension("TSX"),
+            FileTypeCategory::Developer
+        );
+        assert_eq!(
+            FileTypeCategory::from_extension("mp4"),
+            FileTypeCategory::Media
+        );
+        assert_eq!(
+            FileTypeCategory::from_extension("dmg"),
+            FileTypeCategory::Archives
+        );
+        assert_eq!(
+            FileTypeCategory::from_extension("pdf"),
+            FileTypeCategory::Documents
+        );
+        assert_eq!(
+            FileTypeCategory::from_extension("log"),
+            FileTypeCategory::SystemCaches
+        );
+        assert_eq!(
+            FileTypeCategory::from_extension("unknown_ext_xyz"),
+            FileTypeCategory::Other
+        );
     }
 
     #[test]
@@ -572,7 +600,10 @@ mod tests {
         assert!(res.root_node.allocated_bytes > 0);
         assert!(res.coverage.total_files_analyzed >= 1);
         assert_eq!(res.file_type_distribution.len(), 1);
-        assert_eq!(res.file_type_distribution[0].category, FileTypeCategory::Developer);
+        assert_eq!(
+            res.file_type_distribution[0].category,
+            FileTypeCategory::Developer
+        );
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
@@ -622,7 +653,10 @@ mod tests {
 
         // The symlink must be recognized as Symlink and must not traverse into outside.bin
         assert_eq!(res.root_node.children.len(), 1);
-        assert_eq!(res.root_node.children[0].node_type, StorageNodeType::Symlink);
+        assert_eq!(
+            res.root_node.children[0].node_type,
+            StorageNodeType::Symlink
+        );
         assert_eq!(res.root_node.children[0].children.len(), 0);
 
         let _ = std::fs::remove_dir_all(&temp_dir);

@@ -30,7 +30,8 @@ fn test_toctou_symlink_substitution_rejection() {
     fs::write(&legitimate_file, b"disposable cache payload").unwrap();
 
     // 1. Capture legitimate snapshot during simulated scan
-    let snapshot = SafetyGuard::capture_snapshot(&legitimate_file).expect("Failed to capture snapshot");
+    let snapshot =
+        SafetyGuard::capture_snapshot(&legitimate_file).expect("Failed to capture snapshot");
     assert!(!snapshot.is_symlink);
     assert!(snapshot.is_file);
 
@@ -80,7 +81,10 @@ fn test_toctou_inode_replacement_rejection() {
 
     let verify_res = SafetyGuard::verify_unaltered(&target_file, &altered_snapshot);
     assert!(verify_res.is_err());
-    assert!(matches!(verify_res.unwrap_err(), SafetyError::SecurityViolation(_)));
+    assert!(matches!(
+        verify_res.unwrap_err(),
+        SafetyError::SecurityViolation(_)
+    ));
 
     let _ = fs::remove_dir_all(&temp);
 }
@@ -220,9 +224,7 @@ fn test_bounded_synthetic_benchmark() {
 
     let duration_ms = duration.as_millis().max(1);
     let files_per_sec = (total_count as f64 / duration.as_secs_f64()).max(0.0);
-    println!(
-        "\n--- [BENCHMARK] Synthetic Filesystem Scan ---"
-    );
+    println!("\n--- [BENCHMARK] Synthetic Filesystem Scan ---");
     println!(
         "Items scanned: {} in {:?} ({:.0} files/sec)",
         total_count, duration, files_per_sec
@@ -242,11 +244,13 @@ fn test_bounded_synthetic_benchmark() {
     let cancel_duration = cancel_start.elapsed();
 
     assert!(scan_cancel_res.was_cancelled);
-    println!(
-        "Cancellation latency: {:?}", cancel_duration
-    );
+    println!("Cancellation latency: {:?}", cancel_duration);
     // Cancellation check must return in under 50ms
-    assert!(cancel_duration.as_millis() < 50, "Cancellation too slow: {:?}", cancel_duration);
+    assert!(
+        cancel_duration.as_millis() < 50,
+        "Cancellation too slow: {:?}",
+        cancel_duration
+    );
 
     // Clean up temporary fixture
     let _ = fs::remove_dir_all(&temp);

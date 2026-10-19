@@ -131,7 +131,13 @@ mod tests {
         let summary = SystemTelemetry::get_system_summary();
         assert!(!summary.architecture.is_empty());
         assert!(summary.memory.total_bytes > 0);
-        println!("Detected CPU: {} ({} cores)", summary.cpu_brand, summary.cpu_count);
-        println!("Memory: {} GB total", summary.memory.total_bytes / (1024 * 1024 * 1024));
+        println!(
+            "Detected CPU: {} ({} cores)",
+            summary.cpu_brand, summary.cpu_count
+        );
+        println!(
+            "Memory: {} GB total",
+            summary.memory.total_bytes / (1024 * 1024 * 1024)
+        );
     }
 }

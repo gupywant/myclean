@@ -25,7 +25,9 @@ fn test_settings_persistence_and_defaults() {
     modified.large_file_threshold_mb = 250;
     modified.developer_workspaces = vec!["/Users/test/Code/proj1".into()];
 
-    let saved = db.update_preferences(modified).expect("Failed to save prefs");
+    let saved = db
+        .update_preferences(modified)
+        .expect("Failed to save prefs");
     assert_eq!(saved.theme, "system");
     assert_eq!(saved.accent_color, "cyan");
     assert_eq!(saved.large_file_threshold_mb, 250);
@@ -66,14 +68,20 @@ fn test_mandatory_exclusion_immutability() {
 
     // Attempting to remove macOS SIP root
     let remove_sys = db.remove_custom_exclusion("/System");
-    assert!(remove_sys.is_err(), "Mandatory /System must be non-removable");
+    assert!(
+        remove_sys.is_err(),
+        "Mandatory /System must be non-removable"
+    );
     assert!(remove_sys.unwrap_err().contains("Cannot remove mandatory"));
 
     // Attempting to remove personal Documents
     if let Some(home) = dirs::home_dir() {
         let docs = home.join("Documents").to_string_lossy().to_string();
         let remove_docs = db.remove_custom_exclusion(&docs);
-        assert!(remove_docs.is_err(), "Mandatory Documents must be non-removable");
+        assert!(
+            remove_docs.is_err(),
+            "Mandatory Documents must be non-removable"
+        );
     }
 }
 
@@ -125,7 +133,13 @@ fn test_history_pagination_filtering_and_accuracy() {
             timestamp: format!("2026-10-1{:02}T12:00:00Z", i),
             bytes_freed: (i as u64) * 10_000_000,
             items_deleted: i * 5,
-            method: if i == 1 { "dry_run".into() } else if i == 2 { "docker".into() } else { "trash".into() },
+            method: if i == 1 {
+                "dry_run".into()
+            } else if i == 2 {
+                "docker".into()
+            } else {
+                "trash".into()
+            },
             details_json: serde_json::json!({
                 "dry_run": i == 1,
                 "items_deleted": i * 5,
@@ -133,7 +147,8 @@ fn test_history_pagination_filtering_and_accuracy() {
                 "items_failed": 0,
                 "provider_id": if i == 3 { Some("xcode_derived_data") } else { None },
                 "resource_types": if i == 2 { Some(vec!["dangling_image"]) } else { None },
-            }).to_string(),
+            })
+            .to_string(),
         };
         db.insert_cleanup_record(&rec).unwrap();
     }

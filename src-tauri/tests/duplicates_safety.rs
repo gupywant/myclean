@@ -63,7 +63,10 @@ fn test_integration_original_preservation_enforced() {
         confirmed: true,
     };
     let res2 = DuplicateScanner::clean_duplicate_groups(bad_orig_req, &db, cancel_token);
-    assert!(res2.is_err(), "Must strictly reject non-existent designated original");
+    assert!(
+        res2.is_err(),
+        "Must strictly reject non-existent designated original"
+    );
 
     let _ = fs::remove_dir_all(&temp);
 }

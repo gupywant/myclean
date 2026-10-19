@@ -106,7 +106,9 @@ impl DuplicateScanner {
         // Recheck file modification to detect concurrent edits during hashing
         if let (Some(init), Ok(later)) = (initial_mod, file.metadata().and_then(|m| m.modified())) {
             if init != later {
-                return Err(std::io::Error::other("File modified during partial hashing"));
+                return Err(std::io::Error::other(
+                    "File modified during partial hashing",
+                ));
             }
         }
 
@@ -136,7 +138,9 @@ impl DuplicateScanner {
 
         // Verify total bytes read matches metadata length
         if total_read != initial_len {
-            return Err(std::io::Error::other("File size changed during streaming hash"));
+            return Err(std::io::Error::other(
+                "File size changed during streaming hash",
+            ));
         }
 
         // Verify modification timestamp didn't change during read
@@ -247,10 +251,7 @@ impl DuplicateScanner {
             percent_complete: 5.0,
         });
 
-        for entry_res in WalkDir::new(root)
-            .follow_links(false)
-            .into_iter()
-        {
+        for entry_res in WalkDir::new(root).follow_links(false).into_iter() {
             if cancel_token.load(Ordering::Relaxed) {
                 return DuplicateScanResult {
                     duration_ms: start.elapsed().as_millis() as u64,
@@ -267,7 +268,10 @@ impl DuplicateScanner {
             let entry = match entry_res {
                 Ok(e) => e,
                 Err(err) => {
-                    let p = err.path().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+                    let p = err
+                        .path()
+                        .map(|p| p.to_string_lossy().to_string())
+                        .unwrap_or_default();
                     skipped_paths.push(SkippedPath {
                         path: p,
                         reason: err.to_string(),
@@ -282,7 +286,9 @@ impl DuplicateScanner {
             }
 
             let path = entry.path();
-            if SafetyGuard::is_mandatory_exclusion(path) || SafetyGuard::is_database_or_persistent_state(path) {
+            if SafetyGuard::is_mandatory_exclusion(path)
+                || SafetyGuard::is_database_or_persistent_state(path)
+            {
                 continue;
             }
 
@@ -313,15 +319,18 @@ impl DuplicateScanner {
                         .ok()
                         .map(|t| chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339());
 
-                    size_buckets.entry(len).or_default().push(CandidateFileMeta {
-                        path: path.to_path_buf(),
-                        len,
-                        alloc_bytes,
-                        dev: meta.dev(),
-                        ino: meta.ino(),
-                        nlink: meta.nlink(),
-                        modified_at,
-                    });
+                    size_buckets
+                        .entry(len)
+                        .or_default()
+                        .push(CandidateFileMeta {
+                            path: path.to_path_buf(),
+                            len,
+                            alloc_bytes,
+                            dev: meta.dev(),
+                            ino: meta.ino(),
+                            nlink: meta.nlink(),
+                            modified_at,
+                        });
                 }
             }
         }
@@ -332,10 +341,14 @@ impl DuplicateScanner {
             .filter(|(_, files)| files.len() > 1)
             .collect();
 
-        let total_candidate_files: usize = candidate_sizes.iter().map(|(_, files)| files.len()).sum();
+        let total_candidate_files: usize =
+            candidate_sizes.iter().map(|(_, files)| files.len()).sum();
 
         progress_cb(DuplicateScanProgress {
-            phase: format!("Filtering {} candidate files by partial hash...", total_candidate_files),
+            phase: format!(
+                "Filtering {} candidate files by partial hash...",
+                total_candidate_files
+            ),
             files_scanned: total_files_scanned,
             candidate_files: total_candidate_files,
             candidate_groups: candidate_sizes.len(),
@@ -345,7 +358,8 @@ impl DuplicateScanner {
         });
 
         // Phase 2: Compute quick hash for candidates in parallel
-        let partial_hash_candidates: Arc<Mutex<Vec<Vec<CandidateFileMeta>>>> = Arc::new(Mutex::new(Vec::new()));
+        let partial_hash_candidates: Arc<Mutex<Vec<Vec<CandidateFileMeta>>>> =
+            Arc::new(Mutex::new(Vec::new()));
         let skipped_collector: Arc<Mutex<Vec<SkippedPath>>> = Arc::new(Mutex::new(skipped_paths));
 
         candidate_sizes.into_par_iter().for_each(|(_size, files)| {
@@ -383,16 +397,25 @@ impl DuplicateScanner {
                 total_wasted_bytes: 0,
                 total_reclaimable_bytes: 0,
                 groups: Vec::new(),
-                skipped_paths: Arc::try_unwrap(skipped_collector).unwrap().into_inner().unwrap(),
+                skipped_paths: Arc::try_unwrap(skipped_collector)
+                    .unwrap()
+                    .into_inner()
+                    .unwrap(),
                 was_cancelled: true,
             };
         }
 
-        let full_hash_input = Arc::try_unwrap(partial_hash_candidates).unwrap().into_inner().unwrap();
+        let full_hash_input = Arc::try_unwrap(partial_hash_candidates)
+            .unwrap()
+            .into_inner()
+            .unwrap();
         let total_groups_to_verify = full_hash_input.len();
 
         progress_cb(DuplicateScanProgress {
-            phase: format!("Verifying {} duplicate groups via streaming BLAKE3...", total_groups_to_verify),
+            phase: format!(
+                "Verifying {} duplicate groups via streaming BLAKE3...",
+                total_groups_to_verify
+            ),
             files_scanned: total_files_scanned,
             candidate_files: full_hash_input.iter().map(|g| g.len()).sum(),
             candidate_groups: total_groups_to_verify,
@@ -442,7 +465,12 @@ impl DuplicateScanner {
                             has_hardlinks = true;
                         }
 
-                        let name = mf.path.file_name().unwrap_or_default().to_string_lossy().to_string();
+                        let name = mf
+                            .path
+                            .file_name()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .to_string();
 
                         duplicate_files.push(DuplicateFile {
                             path: mf.path.to_string_lossy().to_string(),
@@ -485,7 +513,10 @@ impl DuplicateScanner {
             }
         });
 
-        let mut groups = Arc::try_unwrap(confirmed_groups).unwrap().into_inner().unwrap();
+        let mut groups = Arc::try_unwrap(confirmed_groups)
+            .unwrap()
+            .into_inner()
+            .unwrap();
         // Sort groups by reclaimable bytes descending
         groups.sort_by_key(|a| std::cmp::Reverse(a.reclaimable_bytes));
 
@@ -493,10 +524,16 @@ impl DuplicateScanner {
         let total_reclaimable_bytes: u64 = groups.iter().map(|g| g.reclaimable_bytes).sum();
         let total_duplicate_files: usize = groups.iter().map(|g| g.files.len()).sum();
         let total_duplicate_groups = groups.len();
-        let final_skipped = Arc::try_unwrap(skipped_collector).unwrap().into_inner().unwrap();
+        let final_skipped = Arc::try_unwrap(skipped_collector)
+            .unwrap()
+            .into_inner()
+            .unwrap();
 
         progress_cb(DuplicateScanProgress {
-            phase: format!("Duplicate detection complete. Found {} groups.", total_duplicate_groups),
+            phase: format!(
+                "Duplicate detection complete. Found {} groups.",
+                total_duplicate_groups
+            ),
             files_scanned: total_files_scanned,
             candidate_files: total_duplicate_files,
             candidate_groups: total_duplicate_groups,
@@ -526,7 +563,10 @@ impl DuplicateScanner {
         let start = Instant::now();
 
         if !req.confirmed && !req.dry_run {
-            return Err("Execution rejected: Duplicate cleanup confirmation was not explicitly provided.".to_string());
+            return Err(
+                "Execution rejected: Duplicate cleanup confirmation was not explicitly provided."
+                    .to_string(),
+            );
         }
 
         if req.groups.is_empty() {
@@ -569,7 +609,11 @@ impl DuplicateScanner {
             }
 
             // 2. Reject if paths_to_delete contains original_path
-            if group_sel.paths_to_delete.iter().any(|p| p == &group_sel.original_path) {
+            if group_sel
+                .paths_to_delete
+                .iter()
+                .any(|p| p == &group_sel.original_path)
+            {
                 return Err(format!(
                     "Original preservation violation: Attempted to delete the designated original copy '{}' in group '{}'.",
                     group_sel.original_path, group_sel.group_hash
@@ -670,7 +714,10 @@ impl DuplicateScanner {
                     Err(e) => {
                         errors.push(CleanErrorItem {
                             path: target_str.clone(),
-                            error_message: format!("Failed to capture file metadata snapshot: {}", e),
+                            error_message: format!(
+                                "Failed to capture file metadata snapshot: {}",
+                                e
+                            ),
                         });
                         items_failed += 1;
                         continue;
@@ -690,7 +737,10 @@ impl DuplicateScanner {
                 if let Err(e) = SafetyGuard::verify_unaltered(&canonical, &snapshot) {
                     errors.push(CleanErrorItem {
                         path: target_str.clone(),
-                        error_message: format!("Security violation during pre-clean verification: {}", e),
+                        error_message: format!(
+                            "Security violation during pre-clean verification: {}",
+                            e
+                        ),
                     });
                     items_failed += 1;
                     continue;
@@ -969,7 +1019,9 @@ mod tests {
         };
         let res1 = DuplicateScanner::clean_duplicate_groups(bad_req_1, &db, cancel.clone());
         assert!(res1.is_err());
-        assert!(res1.unwrap_err().contains("Original preservation violation"));
+        assert!(res1
+            .unwrap_err()
+            .contains("Original preservation violation"));
 
         // 2. Violation: Attempting to clean without specifying an original path
         let bad_req_2 = CleanDuplicatesRequest {
@@ -983,7 +1035,9 @@ mod tests {
         };
         let res2 = DuplicateScanner::clean_duplicate_groups(bad_req_2, &db, cancel.clone());
         assert!(res2.is_err());
-        assert!(res2.unwrap_err().contains("Original preservation violation"));
+        assert!(res2
+            .unwrap_err()
+            .contains("Original preservation violation"));
 
         // 3. Valid: Original preserved, duplicate deleted
         let valid_req = CleanDuplicatesRequest {
@@ -1037,7 +1091,9 @@ mod tests {
         let res = DuplicateScanner::clean_duplicate_groups(req, &db, cancel).unwrap();
         assert!(!res.success);
         assert_eq!(res.items_skipped, 1);
-        assert!(res.errors[0].error_message.contains("modified after scanning completed"));
+        assert!(res.errors[0]
+            .error_message
+            .contains("modified after scanning completed"));
         assert!(dup.exists()); // File must NOT be deleted due to race condition
 
         let _ = std::fs::remove_dir_all(&temp_dir);

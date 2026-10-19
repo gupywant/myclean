@@ -32,17 +32,37 @@ fn test_scanner_progress_event_structure() {
 
     assert!(!result.was_cancelled);
     let events = progress_events.lock().unwrap();
-    assert!(!events.is_empty(), "Progress events should be emitted during scan");
+    assert!(
+        !events.is_empty(),
+        "Progress events should be emitted during scan"
+    );
 
     // Verify all 13 structured fields on every single emitted event
     for p in events.iter() {
         assert!(!p.session_id.is_empty(), "session_id must not be empty");
         assert!(!p.category_id.is_empty(), "category_id must not be empty");
-        assert!(!p.current_category.is_empty(), "current_category must not be empty");
-        assert!(p.overall_progress >= 0.0 && p.overall_progress <= 100.0, "overall_progress out of range: {}", p.overall_progress);
-        assert!(p.category_progress >= -1.0 && p.category_progress <= 100.0, "category_progress out of range: {}", p.category_progress);
-        assert_eq!(p.items_discovered, p.items_found, "items_discovered must match backward-compat items_found");
-        assert_eq!(p.overall_progress, p.percent_complete, "overall_progress must match backward-compat percent_complete");
+        assert!(
+            !p.current_category.is_empty(),
+            "current_category must not be empty"
+        );
+        assert!(
+            p.overall_progress >= 0.0 && p.overall_progress <= 100.0,
+            "overall_progress out of range: {}",
+            p.overall_progress
+        );
+        assert!(
+            p.category_progress >= -1.0 && p.category_progress <= 100.0,
+            "category_progress out of range: {}",
+            p.category_progress
+        );
+        assert_eq!(
+            p.items_discovered, p.items_found,
+            "items_discovered must match backward-compat items_found"
+        );
+        assert_eq!(
+            p.overall_progress, p.percent_complete,
+            "overall_progress must match backward-compat percent_complete"
+        );
     }
 }
 
@@ -54,7 +74,10 @@ fn test_scanner_progress_monotonicity() {
 
     let config = ScanScopeConfig::default();
     let result = Scanner::scan_with_config(config, cancel, move |p| {
-        progress_values_clone.lock().unwrap().push(p.overall_progress);
+        progress_values_clone
+            .lock()
+            .unwrap()
+            .push(p.overall_progress);
     });
 
     assert!(!result.was_cancelled);
@@ -76,7 +99,10 @@ fn test_scanner_progress_monotonicity() {
 #[test]
 fn test_scanner_category_status_transitions() {
     let cancel = Arc::new(AtomicBool::new(false));
-    let statuses_by_category = Arc::new(Mutex::new(std::collections::HashMap::<String, Vec<CategoryScanStatus>>::new()));
+    let statuses_by_category = Arc::new(Mutex::new(std::collections::HashMap::<
+        String,
+        Vec<CategoryScanStatus>,
+    >::new()));
     let statuses_clone = statuses_by_category.clone();
 
     let config = ScanScopeConfig {
@@ -141,7 +167,10 @@ fn test_scanner_cancellation_mid_scan_partial_state() {
         }
     });
 
-    assert!(result.was_cancelled, "Result must record was_cancelled = true");
+    assert!(
+        result.was_cancelled,
+        "Result must record was_cancelled = true"
+    );
     let recorded_events = events.lock().unwrap();
 
     // Invariant: when cancelled, overall_progress must never claim 100%
@@ -152,7 +181,8 @@ fn test_scanner_cancellation_mid_scan_partial_state() {
             last_event.overall_progress
         );
         assert!(
-            last_event.category_status == CategoryScanStatus::Partial || last_event.category_status == CategoryScanStatus::Scanning,
+            last_event.category_status == CategoryScanStatus::Partial
+                || last_event.category_status == CategoryScanStatus::Scanning,
             "Last event of aborted scan should reflect Partial or Scanning state, got: {:?}",
             last_event.category_status
         );
@@ -195,7 +225,8 @@ fn test_scanner_docker_graceful_skip() {
     // Either Docker is running and Completed, or Docker is offline/CLI missing and Skipped
     let last = devents.last().unwrap();
     assert!(
-        last.category_status == CategoryScanStatus::Completed || last.category_status == CategoryScanStatus::Skipped,
+        last.category_status == CategoryScanStatus::Completed
+            || last.category_status == CategoryScanStatus::Skipped,
         "Docker stage must either complete cleanly or skip gracefully: got {:?}",
         last.category_status
     );
@@ -238,7 +269,10 @@ fn test_disabled_stages_do_not_advance_overall_progress() {
         .filter(|e| e.category_status == CategoryScanStatus::Skipped)
         .collect();
 
-    assert!(!skipped_events.is_empty(), "Must have skipped events for disabled categories");
+    assert!(
+        !skipped_events.is_empty(),
+        "Must have skipped events for disabled categories"
+    );
     for s in skipped_events {
         assert_eq!(
             s.category_progress, 0.0,
@@ -410,16 +444,28 @@ fn test_repeated_scan_execution() {
             events_clone.lock().unwrap().push(p);
         });
 
-        assert!(!result.was_cancelled, "Run {} must complete without cancellation", run);
+        assert!(
+            !result.was_cancelled,
+            "Run {} must complete without cancellation",
+            run
+        );
         let recorded = events.lock().unwrap();
         assert!(!recorded.is_empty(), "Run {} must emit events", run);
 
         for p in recorded.iter() {
-            assert_eq!(p.session_id, run_session_id, "Run {} events must match its own session_id", run);
+            assert_eq!(
+                p.session_id, run_session_id,
+                "Run {} events must match its own session_id",
+                run
+            );
         }
 
         let last = recorded.last().unwrap();
-        assert_eq!(last.overall_progress, 100.0, "Run {} final event must report 100.0%", run);
+        assert_eq!(
+            last.overall_progress, 100.0,
+            "Run {} final event must report 100.0%",
+            run
+        );
     }
 }
 
@@ -475,14 +521,20 @@ fn test_live_filesystem_smart_scan_telemetry() {
     };
 
     println!("\n=== LIVE SMART SCAN TELEMETRY RECORDING ===");
-    println!("1. Initial State: session_id={}, is_scanning=true, overall_progress=0.0%", session_id);
+    println!(
+        "1. Initial State: session_id={}, is_scanning=true, overall_progress=0.0%",
+        session_id
+    );
 
     let result = Scanner::scan_with_config(config, cancel, move |p| {
         events_clone.lock().unwrap().push(p);
     });
 
     let recorded = events.lock().unwrap();
-    assert!(!recorded.is_empty(), "Must emit progress events on real filesystem");
+    assert!(
+        !recorded.is_empty(),
+        "Must emit progress events on real filesystem"
+    );
 
     let first = recorded.first().unwrap();
     println!("2. First Progress Event: category={}, phase={}, status={:?}, cat_prog={}, overall={:.1}%, files={}",
@@ -495,13 +547,16 @@ fn test_live_filesystem_smart_scan_telemetry() {
         let p25 = &recorded[count / 4];
         let p50 = &recorded[count / 2];
         let p75 = &recorded[(count * 3) / 4];
-        println!("3. Intermediate State (25%): category={}, overall={:.1}%, files={}, found_bytes={}",
+        println!(
+            "3. Intermediate State (25%): category={}, overall={:.1}%, files={}, found_bytes={}",
             p25.category_id, p25.overall_progress, p25.files_inspected, p25.bytes_found
         );
-        println!("   Intermediate State (50%): category={}, overall={:.1}%, files={}, found_bytes={}",
+        println!(
+            "   Intermediate State (50%): category={}, overall={:.1}%, files={}, found_bytes={}",
             p50.category_id, p50.overall_progress, p50.files_inspected, p50.bytes_found
         );
-        println!("   Intermediate State (75%): category={}, overall={:.1}%, files={}, found_bytes={}",
+        println!(
+            "   Intermediate State (75%): category={}, overall={:.1}%, files={}, found_bytes={}",
             p75.category_id, p75.overall_progress, p75.files_inspected, p75.bytes_found
         );
     }
@@ -511,12 +566,17 @@ fn test_live_filesystem_smart_scan_telemetry() {
         last.phase, last.category_status, last.overall_progress, last.files_inspected, last.bytes_found
     );
 
-    println!("5. Scan Completion: duration_ms={}, total_items={}, total_bytes={}, was_cancelled={}\n",
+    println!(
+        "5. Scan Completion: duration_ms={}, total_items={}, total_bytes={}, was_cancelled={}\n",
         result.duration_ms, result.total_items, result.total_bytes, result.was_cancelled
     );
 
-    assert_eq!(last.overall_progress, 100.0, "Completed scan must reach 100.0%");
-    assert!(!result.was_cancelled, "Live scan must complete successfully");
+    assert_eq!(
+        last.overall_progress, 100.0,
+        "Completed scan must reach 100.0%"
+    );
+    assert!(
+        !result.was_cancelled,
+        "Live scan must complete successfully"
+    );
 }
-
-
