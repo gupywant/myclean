@@ -424,7 +424,8 @@
   - Recorded telemetry: Initial state (0.0%) -> First event (0.0%, indeterminate -1.0) -> Intermediate (19.8%, 25.8%, 54.8%) -> Final UI state (100.0%, completed).
 - [x] **Regression Test Suites:**
   - Added Rust tests `test_session_id_coordination`, `test_progress_event_serialization_compatibility`, `test_repeated_scan_execution`, and `test_stale_session_event_rejection_logic` in `tests/scanner_progress.rs` (101/101 cargo tests passing).
-  - Added frontend test suite `tests/scanner_progress.test.ts` (5/5 tests passing via `npx tsx`).
+  - Added frontend test suite `tests/scanner_progress.test.ts` (6/6 tests passing via `npx tsx`) verifying full lifecycle transitions from initialization to final completed result screen with 100% stage card finalization and selected bytes summation.
+  - Added defensive category completion guarantee in `useCleanStore.ts` ensuring all categories finalize into completed state upon result delivery.
   - Clean TypeScript checks (`npx tsc --noEmit`), Vite production build (`npm run build`), and Clippy checks (`cargo clippy -- -D warnings`).
   - Installed and verified fresh bundle in `/Applications/myclean.app`.
 
