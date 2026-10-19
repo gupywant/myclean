@@ -14,6 +14,7 @@ use crate::docker::{
 };
 use crate::duplicates::{CleanDuplicatesRequest, DuplicateScanProgress, DuplicateScanResult, DuplicateScanner};
 use crate::notifications::NotificationManager;
+use crate::safety::SafetyGuard;
 use crate::scanner::{ScanProgress, ScanResult, ScanScopeConfig, Scanner};
 use crate::storage::{StorageAnalysisResult, StorageAnalyzer};
 use crate::system::{SystemSummary, SystemTelemetry};
@@ -153,10 +154,23 @@ pub async fn scan_duplicates(
     state.duplicate_cancel_token.store(false, Ordering::Relaxed);
     let cancel = state.duplicate_cancel_token.clone();
 
-    let target = target_path
-        .map(PathBuf::from)
-        .or_else(dirs::download_dir)
-        .unwrap_or_else(|| PathBuf::from("/"));
+    let target = if let Some(p_str) = target_path {
+        let trimmed = p_str.trim();
+        if trimmed.is_empty() || trimmed.contains('\0') {
+            return Err("Duplicate scan path cannot be empty or contain null bytes".into());
+        }
+        SafetyGuard::check_path_traversal(trimmed).map_err(|e| e.to_string())?;
+        let p = PathBuf::from(trimmed);
+        if !p.is_dir() {
+            return Err(format!("Duplicate scan target is not a valid directory: {}", trimmed));
+        }
+        if SafetyGuard::is_system_protected(&p) {
+            return Err(format!("Duplicate scan rejected: '{}' is a protected macOS system location.", trimmed));
+        }
+        p.canonicalize().map_err(|e| e.to_string())?
+    } else {
+        dirs::download_dir().unwrap_or_else(|| PathBuf::from("/"))
+    };
 
     let min_bytes = min_size_bytes.unwrap_or(1024 * 1024); // default 1MB
 
@@ -400,12 +414,25 @@ pub async fn analyze_storage(
     state.storage_cancel_token.store(false, Ordering::Relaxed);
     let cancel = state.storage_cancel_token.clone();
 
-    let target_path = path
-        .map(PathBuf::from)
-        .or_else(dirs::home_dir)
-        .unwrap_or_else(|| PathBuf::from("/"));
+    let target_path = if let Some(p_str) = path {
+        let trimmed = p_str.trim();
+        if trimmed.is_empty() || trimmed.contains('\0') {
+            return Err("Storage analysis path cannot be empty or contain null bytes".into());
+        }
+        SafetyGuard::check_path_traversal(trimmed).map_err(|e| e.to_string())?;
+        let p = PathBuf::from(trimmed);
+        if !p.exists() {
+            return Err(format!("Storage analysis path does not exist: {}", trimmed));
+        }
+        if SafetyGuard::is_system_protected(&p) {
+            return Err(format!("Storage analysis rejected: '{}' is a protected macOS system location.", trimmed));
+        }
+        p.canonicalize().map_err(|e| e.to_string())?
+    } else {
+        dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"))
+    };
 
-    let depth = max_depth.unwrap_or(4);
+    let depth = max_depth.unwrap_or(4).min(8);
 
     tokio::task::spawn_blocking(move || {
         StorageAnalyzer::analyze(target_path, depth, cancel)
@@ -422,13 +449,23 @@ pub fn cancel_storage_analysis(state: State<'_, AppState>) -> bool {
 
 #[tauri::command]
 pub fn open_in_finder(path: String) -> Result<(), String> {
-    let p = std::path::Path::new(&path);
-    if !p.exists() {
-        return Err(format!("Path does not exist: {}", path));
+    let trimmed = path.trim();
+    if trimmed.is_empty() || trimmed.starts_with('-') || trimmed.contains('\0') {
+        return Err("Invalid path parameter".into());
     }
+    SafetyGuard::check_path_traversal(trimmed).map_err(|e| e.to_string())?;
+
+    let p = std::path::Path::new(trimmed);
+    if !p.exists() {
+        return Err(format!("Path does not exist: {}", trimmed));
+    }
+
+    let canonical = p.canonicalize().map_err(|e| format!("Cannot resolve path: {}", e))?;
+
     std::process::Command::new("open")
         .arg("-R")
-        .arg(&path)
+        .arg("--")
+        .arg(&canonical)
         .spawn()
         .map_err(|e| format!("Failed to open in Finder: {}", e))?;
     Ok(())
@@ -456,8 +493,23 @@ pub fn cancel_developer_scan(state: State<'_, AppState>) -> bool {
 pub async fn inspect_developer_workspace(
     workspace_path: String,
 ) -> Result<Vec<DeveloperArtifactItem>, String> {
+    let trimmed = workspace_path.trim();
+    if trimmed.is_empty() || trimmed.contains('\0') {
+        return Err("Workspace path cannot be empty or contain null bytes".into());
+    }
+    SafetyGuard::check_path_traversal(trimmed).map_err(|e| e.to_string())?;
+
+    let p = PathBuf::from(trimmed);
+    if !p.is_dir() {
+        return Err(format!("Workspace path '{}' is not a valid directory", trimmed));
+    }
+    if SafetyGuard::is_system_protected(&p) {
+        return Err(format!("Cannot inspect system-protected directory: {}", trimmed));
+    }
+
+    let canonical = p.canonicalize().map_err(|e| e.to_string())?;
     tokio::task::spawn_blocking(move || {
-        DeveloperEngine::inspect_single_workspace(Path::new(&workspace_path))
+        DeveloperEngine::inspect_single_workspace(&canonical)
     })
     .await
     .map_err(|e| e.to_string())?

@@ -1502,6 +1502,19 @@ where
             continue;
         }
 
+        // Capture identity snapshot
+        let snapshot = match SafetyGuard::capture_snapshot(&path) {
+            Ok(s) => s,
+            Err(e) => {
+                items_failed += 1;
+                errors.push(CleanErrorItem {
+                    path: path.to_string_lossy().to_string(),
+                    error_message: format!("Failed to capture file metadata snapshot: {}", e),
+                });
+                continue;
+            }
+        };
+
         let (size, _) = Scanner::measure_path(&path);
 
         if dry_run {
@@ -1509,6 +1522,16 @@ where
             items_deleted += 1;
             deleted_strings.push(path.to_string_lossy().to_string());
         } else {
+            // Anti-TOCTOU & Symlink Substitution Revalidation immediately prior to deletion
+            if let Err(e) = SafetyGuard::verify_unaltered(&path, &snapshot) {
+                items_failed += 1;
+                errors.push(CleanErrorItem {
+                    path: path.to_string_lossy().to_string(),
+                    error_message: format!("Security violation during pre-clean verification: {}", e),
+                });
+                continue;
+            }
+
             match trash::delete(&path) {
                 Ok(_) => {
                     bytes_freed += size;

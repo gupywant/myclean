@@ -1155,6 +1155,18 @@ impl AppInspector {
                 break;
             }
 
+            let snapshot = match SafetyGuard::capture_snapshot(target) {
+                Ok(s) => s,
+                Err(e) => {
+                    items_failed += 1;
+                    errors.push(CleanErrorItem {
+                        path: target.to_string_lossy().to_string(),
+                        error_message: format!("Failed to capture file metadata snapshot: {}", e),
+                    });
+                    continue;
+                }
+            };
+
             let (alloc, _, _) = Scanner::measure_path_detailed(
                 target,
                 &mut HashSet::new(),
@@ -1162,6 +1174,16 @@ impl AppInspector {
                 &[],
                 &AtomicBool::new(false),
             );
+
+            // Anti-TOCTOU & Symlink Substitution Revalidation immediately prior to deletion
+            if let Err(e) = SafetyGuard::verify_unaltered(target, &snapshot) {
+                items_failed += 1;
+                errors.push(CleanErrorItem {
+                    path: target.to_string_lossy().to_string(),
+                    error_message: format!("Security violation during pre-clean verification: {}", e),
+                });
+                continue;
+            }
 
             match trash::delete(target) {
                 Ok(_) => {
@@ -1315,6 +1337,18 @@ impl AppInspector {
         }
 
         for target in &validated_targets {
+            let snapshot = match SafetyGuard::capture_snapshot(target) {
+                Ok(s) => s,
+                Err(e) => {
+                    items_failed += 1;
+                    errors.push(CleanErrorItem {
+                        path: target.to_string_lossy().to_string(),
+                        error_message: format!("Failed to capture file metadata snapshot: {}", e),
+                    });
+                    continue;
+                }
+            };
+
             let (alloc, _, _) = Scanner::measure_path_detailed(
                 target,
                 &mut HashSet::new(),
@@ -1322,6 +1356,16 @@ impl AppInspector {
                 &[],
                 &AtomicBool::new(false),
             );
+
+            // Anti-TOCTOU & Symlink Substitution Revalidation immediately prior to deletion
+            if let Err(e) = SafetyGuard::verify_unaltered(target, &snapshot) {
+                items_failed += 1;
+                errors.push(CleanErrorItem {
+                    path: target.to_string_lossy().to_string(),
+                    error_message: format!("Security violation during pre-clean verification: {}", e),
+                });
+                continue;
+            }
 
             match trash::delete(target) {
                 Ok(_) => {

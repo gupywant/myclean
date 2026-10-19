@@ -664,12 +664,35 @@ impl DuplicateScanner {
                     continue;
                 }
 
+                // Capture identity snapshot
+                let snapshot = match SafetyGuard::capture_snapshot(&canonical) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        errors.push(CleanErrorItem {
+                            path: target_str.clone(),
+                            error_message: format!("Failed to capture file metadata snapshot: {}", e),
+                        });
+                        items_failed += 1;
+                        continue;
+                    }
+                };
+
                 // Measure size
                 let (size, count) = Scanner::measure_path(&canonical);
 
                 if req.dry_run {
                     bytes_freed += size;
                     items_deleted += count.max(1);
+                    continue;
+                }
+
+                // Anti-TOCTOU & Symlink Substitution Revalidation immediately prior to deletion
+                if let Err(e) = SafetyGuard::verify_unaltered(&canonical, &snapshot) {
+                    errors.push(CleanErrorItem {
+                        path: target_str.clone(),
+                        error_message: format!("Security violation during pre-clean verification: {}", e),
+                    });
+                    items_failed += 1;
                     continue;
                 }
 

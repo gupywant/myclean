@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use sysinfo::{ProcessesToUpdate, System};
 use thiserror::Error;
@@ -27,6 +28,8 @@ pub enum SafetyError {
     MandatoryExclusionCannotBeRemoved(String),
     #[error("Custom exclusion is invalid or redundant: {0}")]
     InvalidExclusion(String),
+    #[error("Security violation detected: {0}")]
+    SecurityViolation(String),
     #[error("Filesystem IO error: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -99,6 +102,19 @@ pub struct MandatoryExclusionInfo {
     pub category: String,
     pub explanation: String,
     pub is_system_level: bool,
+}
+
+/// Filesystem snapshot captured via `symlink_metadata` (without following symlinks)
+/// to detect TOCTOU race conditions and symlink swap attacks.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileMetadataSnapshot {
+    pub dev: u64,
+    pub ino: u64,
+    pub is_symlink: bool,
+    pub is_dir: bool,
+    pub is_file: bool,
+    pub size: u64,
+    pub mtime_secs: i64,
 }
 
 pub struct SafetyGuard;
@@ -571,6 +587,70 @@ impl SafetyGuard {
         }
 
         Ok(canonical)
+    }
+
+    /// Captures a strict filesystem identity snapshot using `symlink_metadata`
+    /// (does not follow symlinks) to detect TOCTOU and file-swapping attacks.
+    pub fn capture_snapshot<P: AsRef<Path>>(path: P) -> Result<FileMetadataSnapshot, SafetyError> {
+        let p = path.as_ref();
+        let meta = std::fs::symlink_metadata(p).map_err(SafetyError::Io)?;
+        let ft = meta.file_type();
+        let mtime_secs = meta
+            .modified()
+            .ok()
+            .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+
+        Ok(FileMetadataSnapshot {
+            dev: meta.dev(),
+            ino: meta.ino(),
+            is_symlink: ft.is_symlink(),
+            is_dir: ft.is_dir(),
+            is_file: ft.is_file(),
+            size: meta.len(),
+            mtime_secs,
+        })
+    }
+
+    /// Verifies that a file's identity (device, inode, file type, symlink status)
+    /// has not been substituted or altered between check and deletion (TOCTOU mitigation).
+    pub fn verify_unaltered<P: AsRef<Path>>(
+        path: P,
+        snapshot: &FileMetadataSnapshot,
+    ) -> Result<(), SafetyError> {
+        let p = path.as_ref();
+        let meta = std::fs::symlink_metadata(p).map_err(SafetyError::Io)?;
+        let ft = meta.file_type();
+
+        // 1. Symlink substitution check: If the original was not a symlink, it must never have transitioned into one
+        if !snapshot.is_symlink && ft.is_symlink() {
+            return Err(SafetyError::SymlinkEscape(format!(
+                "TOCTOU violation: Target '{}' was converted to a symlink. Aborting deletion to protect link target.",
+                p.display()
+            )));
+        }
+
+        // 2. File type mutation check (e.g. file swapped for directory)
+        if snapshot.is_dir != ft.is_dir() || snapshot.is_file != ft.is_file() {
+            return Err(SafetyError::SecurityViolation(format!(
+                "TOCTOU violation: File type mutated between check and deletion for '{}'.",
+                p.display()
+            )));
+        }
+
+        // 3. Inode and Device verification: Detects replacement with a different file or hard link
+        if meta.dev() != snapshot.dev || meta.ino() != snapshot.ino {
+            return Err(SafetyError::SecurityViolation(format!(
+                "TOCTOU violation: File device or inode changed (dev: {}->{}, ino: {}->{}). Possible file replacement attack.",
+                snapshot.dev,
+                meta.dev(),
+                snapshot.ino,
+                meta.ino()
+            )));
+        }
+
+        Ok(())
     }
 }
 

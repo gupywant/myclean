@@ -24,7 +24,7 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self' tauri: http://tauri.localhost; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: data: tauri: http://tauri.localhost; font-src 'self' asset: data: tauri:; connect-src 'self' ipc: http://ipc.localhost http://tauri.localhost tauri:"
     }
   },
   "bundle": {

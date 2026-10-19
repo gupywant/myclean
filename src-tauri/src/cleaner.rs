@@ -168,6 +168,48 @@ impl Cleaner {
                 }
             }
 
+            // Capture identity snapshot on both entry path and canonical target to protect against TOCTOU race conditions and symlink swaps
+            let p_snapshot = match SafetyGuard::capture_snapshot(&p) {
+                Ok(s) => s,
+                Err(e) => {
+                    errors.push(CleanErrorItem {
+                        path: path_str.clone(),
+                        error_message: format!("Failed to capture entry path metadata snapshot: {}", e),
+                    });
+                    items_failed += 1;
+                    continue;
+                }
+            };
+            let canonical_snapshot = match SafetyGuard::capture_snapshot(&canonical) {
+                Ok(s) => s,
+                Err(e) => {
+                    errors.push(CleanErrorItem {
+                        path: path_str.clone(),
+                        error_message: format!("Failed to capture canonical metadata snapshot: {}", e),
+                    });
+                    items_failed += 1;
+                    continue;
+                }
+            };
+
+            // Anti-TOCTOU & Symlink Substitution Revalidation
+            if let Err(e) = SafetyGuard::verify_unaltered(&p, &p_snapshot) {
+                errors.push(CleanErrorItem {
+                    path: path_str.clone(),
+                    error_message: format!("Security violation during pre-clean verification (entry path altered): {}", e),
+                });
+                items_failed += 1;
+                continue;
+            }
+            if let Err(e) = SafetyGuard::verify_unaltered(&canonical, &canonical_snapshot) {
+                errors.push(CleanErrorItem {
+                    path: path_str.clone(),
+                    error_message: format!("Security violation during pre-clean verification (target altered): {}", e),
+                });
+                items_failed += 1;
+                continue;
+            }
+
             // Measure size before deletion
             let (size, count) = Scanner::measure_path(&canonical);
 
