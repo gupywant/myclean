@@ -90,3 +90,59 @@ fn test_docker_status_inspection() {
         assert!(!status.can_cleanup);
     }
 }
+
+#[test]
+fn test_generic_cleaner_strictly_rejects_docker_pseudo_paths() {
+    use myclean_lib::cleaner::{CleanRequest, Cleaner};
+    use std::sync::atomic::AtomicBool;
+    use std::sync::Arc;
+
+    let db = Database::in_memory().unwrap();
+    let cancel = Arc::new(AtomicBool::new(false));
+
+    let req = CleanRequest {
+        paths: vec![
+            "docker://dangling-images".into(),
+            "docker://build-cache".into(),
+            "docker:container:bad123".into(),
+        ],
+        targets: None,
+        method: "trash".into(),
+        dry_run: false,
+        confirmed: true,
+    };
+
+    let res = Cleaner::clean_items(req, &db, cancel).unwrap();
+    assert!(!res.success);
+    assert_eq!(res.items_deleted, 0);
+    assert_eq!(res.items_failed, 3);
+    for err in &res.errors {
+        assert!(
+            err.error_message.contains("Security Policy Violation")
+                && err.error_message.contains("Docker cleanup requires dedicated scope-specific confirmation"),
+            "Expected explicit Docker security policy error, got: {}",
+            err.error_message
+        );
+    }
+}
+
+#[test]
+fn test_docker_scan_items_marked_ineligible_for_generic_cleanup() {
+    use myclean_lib::scanner::{RiskClassification, ScanCategory, Scanner};
+    use std::path::Path;
+
+    let (rule_id, desc, risk, eligible, inelig_reason, app) =
+        Scanner::classify_candidate_rule(ScanCategory::Docker, Path::new("/dummy"));
+
+    assert_eq!(rule_id, "RULE_DOCKER_CLUTTER");
+    assert_eq!(risk, RiskClassification::ReviewRequired);
+    assert!(!eligible, "Docker clutter must be ineligible for generic filesystem clean");
+    assert!(inelig_reason.is_some(), "Ineligibility reason must explain Docker Studio requirement");
+    assert!(
+        inelig_reason.unwrap().contains("Docker Studio"),
+        "Ineligibility reason must point to Docker Studio"
+    );
+    assert_eq!(app, Some("Docker".into()));
+    assert!(!desc.is_empty());
+}
+

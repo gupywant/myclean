@@ -103,45 +103,13 @@ impl Cleaner {
                 break;
             }
 
-            if path_str == "docker://dangling-images" {
-                if req.dry_run {
-                    items_deleted += 1;
-                } else if let Some(cli) = crate::docker::DockerManager::find_docker_cli() {
-                    if let Ok(out) = std::process::Command::new(cli).args(["image", "prune", "-f"]).output() {
-                        if out.status.success() {
-                            let stdout = String::from_utf8_lossy(&out.stdout);
-                            if let Some(pos) = stdout.find("Total reclaimed space:") {
-                                let sub = &stdout[pos + 22..];
-                                let space_str = sub.split_whitespace().next().unwrap_or_default();
-                                let freed = crate::docker::DockerManager::parse_docker_size(space_str);
-                                bytes_freed += freed;
-                                bytes_moved_to_trash += freed;
-                            }
-                            items_deleted += 1;
-                        }
-                    }
-                }
-                continue;
-            }
-
-            if path_str == "docker://build-cache" {
-                if req.dry_run {
-                    items_deleted += 1;
-                } else if let Some(cli) = crate::docker::DockerManager::find_docker_cli() {
-                    if let Ok(out) = std::process::Command::new(cli).args(["builder", "prune", "-f"]).output() {
-                        if out.status.success() {
-                            let stdout = String::from_utf8_lossy(&out.stdout);
-                            if let Some(pos) = stdout.find("Total reclaimed space:") {
-                                let sub = &stdout[pos + 22..];
-                                let space_str = sub.split_whitespace().next().unwrap_or_default();
-                                let freed = crate::docker::DockerManager::parse_docker_size(space_str);
-                                bytes_freed += freed;
-                                bytes_moved_to_trash += freed;
-                            }
-                            items_deleted += 1;
-                        }
-                    }
-                }
+            // Enforce Docker safety boundary: generic cleaner strictly rejects Docker pseudo-paths
+            if path_str.starts_with("docker://") || path_str.starts_with("docker:") {
+                errors.push(CleanErrorItem {
+                    path: path_str.clone(),
+                    error_message: "Security Policy Violation: Docker resources cannot be cleaned via generic filesystem cleanup. Docker cleanup requires dedicated scope-specific confirmation and resource validation via Docker Studio.".into(),
+                });
+                items_failed += 1;
                 continue;
             }
 
@@ -483,5 +451,35 @@ mod tests {
         assert!(target_file.exists()); // Must NOT have been deleted
 
         let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn test_cleaner_rejects_docker_pseudo_paths() {
+        let db = Database::in_memory().unwrap();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let req = CleanRequest {
+            paths: vec![
+                "docker://dangling-images".into(),
+                "docker://build-cache".into(),
+                "docker:container:123".into(),
+            ],
+            targets: None,
+            method: "trash".into(),
+            dry_run: false,
+            confirmed: true,
+        };
+
+        let res = Cleaner::clean_items(req, &db, cancel).unwrap();
+        assert!(!res.success);
+        assert_eq!(res.items_deleted, 0);
+        assert_eq!(res.items_failed, 3);
+        for err in &res.errors {
+            assert!(
+                err.error_message.contains("Security Policy Violation")
+                    && err.error_message.contains("Docker cleanup requires dedicated scope-specific confirmation"),
+                "Expected Docker security policy error, got: {}",
+                err.error_message
+            );
+        }
     }
 }
