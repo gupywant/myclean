@@ -11,11 +11,6 @@ impl NotificationManager {
             None => String::new(),
         };
 
-        let script = format!(
-            "display notification \"{}\" with title \"{}\"{}",
-            msg_clean, title_clean, sub_part
-        );
-
         // Do not spawn intrusive desktop banner notifications during automated test runs
         if std::env::var("MYCLEAN_SUPPRESS_NOTIFICATIONS").is_ok()
             || std::env::current_exe()
@@ -25,23 +20,34 @@ impl NotificationManager {
             return Ok(());
         }
 
-        match std::process::Command::new("osascript")
+        // 1. Dispatch via application bundle ID so macOS attaches the official myclean icon
+        let script_with_icon = format!(
+            "tell application id \"com.myclean.app\" to display notification \"{}\" with title \"{}\"{}",
+            msg_clean, title_clean, sub_part
+        );
+
+        if let Ok(output) = std::process::Command::new("osascript")
             .arg("-e")
-            .arg(&script)
+            .arg(&script_with_icon)
             .output()
         {
-            Ok(output) if output.status.success() => Ok(()),
-            Ok(output) => {
-                let err = String::from_utf8_lossy(&output.stderr);
-                // Return gracefully; notifications being suppressed by Do Not Disturb is normal
-                eprintln!("macOS notification notice: {}", err);
-                Ok(())
-            }
-            Err(e) => {
-                eprintln!("macOS notification execution error: {}", e);
-                Ok(())
+            if output.status.success() {
+                return Ok(());
             }
         }
+
+        // 2. Graceful fallback if application bundle is not registered in LaunchServices
+        let script_fallback = format!(
+            "display notification \"{}\" with title \"{}\"{}",
+            msg_clean, title_clean, sub_part
+        );
+
+        let _ = std::process::Command::new("osascript")
+            .arg("-e")
+            .arg(&script_fallback)
+            .output();
+
+        Ok(())
     }
 }
 
