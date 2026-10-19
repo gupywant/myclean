@@ -21,6 +21,7 @@ export interface ScanScopeConfig {
   include_trash: boolean;
   include_mail_downloads: boolean;
   include_large_files: boolean;
+  include_docker?: boolean;
   large_files_min_mb?: number;
   custom_paths: string[];
   user_exclusions: string[];
@@ -68,7 +69,37 @@ export type ScanCategoryType =
   | "messaging_caches"
   | "user_trash"
   | "mail_downloads"
-  | "large_files";
+  | "large_files"
+  | "docker";
+
+export type CategoryScanStatus =
+  | "pending"
+  | "scanning"
+  | "completed"
+  | "skipped"
+  | "error"
+  | "partial";
+
+export interface LiveCategoryState {
+  id: string;
+  name: string;
+  description: string;
+  status: CategoryScanStatus;
+  progress: number;
+  itemsFound: number;
+  bytesFound: number;
+  skipReason?: string;
+}
+
+export interface DiscoveryFeedItem {
+  id: string;
+  timestamp: number;
+  path: string;
+  shortPath: string;
+  sizeBytes: number;
+  categoryName: string;
+  isSafe: boolean;
+}
 
 export interface ScanItem {
   id: string;
@@ -106,12 +137,26 @@ export interface SkippedPath {
 }
 
 export interface ScanProgress {
-  phase: string;
+  session_id: string;
+  category_id: string;
   current_category: string;
   current_path: string;
+  phase: string;
+  files_inspected: number;
+  directories_inspected: number;
+  bytes_analyzed: number;
+  items_discovered: number;
   items_found: number;
   bytes_found: number;
+  category_status: CategoryScanStatus;
+  category_progress: number;
+  overall_progress: number;
   percent_complete: number;
+  skipped_count: number;
+  permission_denied_count: number;
+  elapsed_ms: number;
+  safe_items_count: number;
+  review_items_count: number;
 }
 
 export interface ScanResult {

@@ -13,6 +13,8 @@ import type {
   CleanupRecord,
   WhitelistEntry,
   ScanCategoryType,
+  LiveCategoryState,
+  DiscoveryFeedItem,
   StorageAnalysisResult,
   StorageNode,
   ActiveAppWarning,
@@ -31,6 +33,72 @@ import type {
   DatabaseHealthReport,
 } from "../types";
 
+export const INITIAL_CATEGORY_STATES: Record<string, LiveCategoryState> = {
+  system_cache: {
+    id: "system_cache",
+    name: "System Cache",
+    description: "macOS system cache buffers",
+    status: "pending",
+    progress: 0,
+    itemsFound: 0,
+    bytesFound: 0,
+  },
+  app_cache: {
+    id: "app_cache",
+    name: "Application Cache",
+    description: "User application runtime caches",
+    status: "pending",
+    progress: 0,
+    itemsFound: 0,
+    bytesFound: 0,
+  },
+  browser_cache: {
+    id: "browser_cache",
+    name: "Browser Cache",
+    description: "Chrome, Safari, Brave & messaging buffers",
+    status: "pending",
+    progress: 0,
+    itemsFound: 0,
+    bytesFound: 0,
+  },
+  developer_cache: {
+    id: "developer_cache",
+    name: "Developer Cache",
+    description: "Xcode, Cargo, Gradle, npm & Homebrew",
+    status: "pending",
+    progress: 0,
+    itemsFound: 0,
+    bytesFound: 0,
+  },
+  logs_and_temp: {
+    id: "logs_and_temp",
+    name: "Logs & Temporary Files",
+    description: "System logs & diagnostic crash reports",
+    status: "pending",
+    progress: 0,
+    itemsFound: 0,
+    bytesFound: 0,
+  },
+  user_trash: {
+    id: "user_trash",
+    name: "macOS Trash",
+    description: "Pending deleted files in user Trash",
+    status: "pending",
+    progress: 0,
+    itemsFound: 0,
+    bytesFound: 0,
+  },
+  docker: {
+    id: "docker",
+    name: "Docker Resources",
+    description: "Dangling Docker images & build cache",
+    status: "pending",
+    progress: 0,
+    itemsFound: 0,
+    bytesFound: 0,
+  },
+};
+
 interface CleanState {
   activeTab: NavigationTab;
   systemSummary: SystemSummary | null;
@@ -42,6 +110,13 @@ interface CleanState {
   scanResult: ScanResult | null;
   selectedItemIds: Set<string>;
   scanConfig: ScanScopeConfig;
+
+  // Smart Scan & Category Live Progress State
+  scanSessionId: string | null;
+  categoryStates: Record<string, LiveCategoryState>;
+  discoveryFeed: DiscoveryFeedItem[];
+  wasScanCancelled: boolean;
+  scanElapsedTimeMs: number;
 
   // Storage Analyzer State
   storageResult: StorageAnalysisResult | null;
@@ -218,6 +293,11 @@ export const useCleanStore = create<CleanState>((set, get) => ({
   scanProgress: null,
   scanResult: null,
   selectedItemIds: new Set<string>(),
+  scanSessionId: null,
+  categoryStates: INITIAL_CATEGORY_STATES,
+  discoveryFeed: [],
+  wasScanCancelled: false,
+  scanElapsedTimeMs: 0,
   scanConfig: {
     include_system_caches: true,
     include_application_logs: true,
@@ -228,6 +308,7 @@ export const useCleanStore = create<CleanState>((set, get) => ({
     include_trash: true,
     include_mail_downloads: true,
     include_large_files: true,
+    include_docker: true,
     large_files_min_mb: 100,
     custom_paths: [],
     user_exclusions: [],
@@ -332,20 +413,97 @@ export const useCleanStore = create<CleanState>((set, get) => ({
   },
 
   startScan: async () => {
+    const sessionId = `scan-${Date.now()}`;
     set({
       isScanning: true,
+      wasScanCancelled: false,
+      scanSessionId: sessionId,
+      categoryStates: { ...INITIAL_CATEGORY_STATES },
+      discoveryFeed: [],
+      scanElapsedTimeMs: 0,
       scanProgress: {
-        phase: "Initializing Parallel Scanner...",
-        current_category: "Caches & Artifacts",
-        current_path: "Preparing search trees...",
+        session_id: sessionId,
+        category_id: "system_cache",
+        current_category: "System Cache",
+        current_path: "Initializing Smart Scan pipeline...",
+        phase: "Starting",
+        files_inspected: 0,
+        directories_inspected: 0,
+        bytes_analyzed: 0,
+        items_discovered: 0,
         items_found: 0,
         bytes_found: 0,
+        category_status: "scanning",
+        category_progress: 0,
+        overall_progress: 0,
         percent_complete: 0,
+        skipped_count: 0,
+        permission_denied_count: 0,
+        elapsed_ms: 0,
+        safe_items_count: 0,
+        review_items_count: 0,
       },
     });
 
     const unlisten = await api.onScanProgress((progress) => {
-      set({ scanProgress: progress });
+      // Validate session ID if present
+      if (get().scanSessionId && progress.session_id && progress.session_id !== get().scanSessionId) {
+        return;
+      }
+
+      set((state) => {
+        const catId = progress.category_id;
+        const prevCat = state.categoryStates[catId] || {
+          id: catId,
+          name: progress.current_category,
+          description: "",
+          status: "pending",
+          progress: 0,
+          itemsFound: 0,
+          bytesFound: 0,
+        };
+
+        const updatedCat: LiveCategoryState = {
+          ...prevCat,
+          status: progress.category_status,
+          progress: progress.category_progress >= 0 ? progress.category_progress : prevCat.progress,
+          itemsFound: progress.items_discovered,
+          bytesFound: progress.bytes_found,
+        };
+
+        // If path is valid, update discovery feed (keep max 30 items)
+        let nextFeed = state.discoveryFeed;
+        if (
+          progress.current_path &&
+          progress.current_path.length > 0 &&
+          !progress.current_path.startsWith("Initializing") &&
+          !progress.current_path.startsWith("Category disabled") &&
+          !progress.current_path.startsWith("No items found")
+        ) {
+          const raw = progress.current_path;
+          const short = raw.replace(/^\/Users\/[^/]+/, "~");
+          const feedItem: DiscoveryFeedItem = {
+            id: `feed-${Date.now()}-${Math.random()}`,
+            timestamp: Date.now(),
+            path: raw,
+            shortPath: short.length > 55 ? `${short.slice(0, 25)}...${short.slice(-25)}` : short,
+            sizeBytes: progress.bytes_found,
+            categoryName: progress.current_category,
+            isSafe: true,
+          };
+          nextFeed = [feedItem, ...state.discoveryFeed.slice(0, 29)];
+        }
+
+        return {
+          scanProgress: progress,
+          scanElapsedTimeMs: progress.elapsed_ms,
+          categoryStates: {
+            ...state.categoryStates,
+            [catId]: updatedCat,
+          },
+          discoveryFeed: nextFeed,
+        };
+      });
     });
 
     try {
@@ -362,14 +520,14 @@ export const useCleanStore = create<CleanState>((set, get) => ({
         scanResult: result,
         selectedItemIds: defaultSelected,
         isScanning: false,
-        scanProgress: null,
+        wasScanCancelled: result.was_cancelled,
       });
 
       // Refresh history
       get().fetchHistory();
     } catch (err) {
       console.error("Scan error:", err);
-      set({ isScanning: false, scanProgress: null });
+      set({ isScanning: false, wasScanCancelled: true });
     } finally {
       unlisten();
     }
@@ -377,7 +535,20 @@ export const useCleanStore = create<CleanState>((set, get) => ({
 
   cancelScan: async () => {
     await api.cancelScan();
-    set({ isScanning: false, scanProgress: null });
+    set((state) => {
+      // Mark active categories as partial
+      const nextCats = { ...state.categoryStates };
+      Object.keys(nextCats).forEach((k) => {
+        if (nextCats[k].status === "scanning") {
+          nextCats[k] = { ...nextCats[k], status: "partial" };
+        }
+      });
+      return {
+        isScanning: false,
+        wasScanCancelled: true,
+        categoryStates: nextCats,
+      };
+    });
   },
 
   startStorageAnalysis: async (path?: string, maxDepth?: number) => {
