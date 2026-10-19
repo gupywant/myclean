@@ -526,9 +526,19 @@
     - Enhanced Empty State with quick shortcuts to scan Documents or browse another folder.
     - All 106 unit & integration tests passing; built and deployed to `/Applications/myclean.app`.
 
+- [x] **Release v1.1.0 Published:**
+  - Automated multi-target packaging with universal `lipo` fat binary stitching.
+  - Tagged and published GitHub Release `v1.1.0` at [https://github.com/gupywant/myclean/releases/tag/v1.1.0](https://github.com/gupywant/myclean/releases/tag/v1.1.0).
+  - Bundled release assets:
+    - `myclean-1.1.0-universal.dmg` (Universal binary for Apple Silicon & Intel Macs)
+    - `myclean-1.1.0-aarch64.dmg` (Apple Silicon thin binary)
+    - `myclean-1.1.0-x86_64.dmg` (Intel 64-bit thin binary)
+    - `SHA256SUMS.txt` cryptographic verification checksums.
+
 ### Phase 12: Homebrew Tap & Update Checker (Planned / Next)
 - [ ] Create Homebrew Tap (`gupywant/homebrew-tap`) and Cask formula (`Casks/myclean.rb`).
 - [ ] Implement opt-in GitHub Release update notifier with semantic version comparisons.
+
 
 
 
