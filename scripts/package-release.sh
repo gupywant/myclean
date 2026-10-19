@@ -27,24 +27,22 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# 1. Build frontend if needed
-if [ ! -d "${REPO_ROOT}/dist" ] || [ ! -f "${REPO_ROOT}/dist/index.html" ]; then
-  echo "--> Building frontend assets..."
-  (cd "${REPO_ROOT}" && npm run build)
-fi
+# 1. Build frontend assets
+echo "--> Building frontend assets..."
+(cd "${REPO_ROOT}" && npm run build)
 
 AARCH64_BIN="${REPO_ROOT}/src-tauri/target/aarch64-apple-darwin/release/myclean"
 X86_64_BIN="${REPO_ROOT}/src-tauri/target/x86_64-apple-darwin/release/myclean"
 
-# 2. Check binary targets
+# 2. Check binary targets (must use tauri CLI to embed frontend in production mode)
 if [ ! -f "${AARCH64_BIN}" ]; then
-  echo "--> Building aarch64 binary..."
-  (cd "${REPO_ROOT}/src-tauri" && cargo build --release --target aarch64-apple-darwin)
+  echo "--> Building aarch64 binary with tauri build..."
+  (cd "${REPO_ROOT}" && npx tauri build --target aarch64-apple-darwin --no-bundle)
 fi
 
 if [ ! -f "${X86_64_BIN}" ]; then
-  echo "--> Building x86_64 binary..."
-  (cd "${REPO_ROOT}/src-tauri" && cargo build --release --target x86_64-apple-darwin)
+  echo "--> Building x86_64 binary with tauri build..."
+  (cd "${REPO_ROOT}" && npx tauri build --target x86_64-apple-darwin --no-bundle)
 fi
 
 # 3. Create universal binary with lipo
