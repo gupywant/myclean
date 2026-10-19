@@ -576,6 +576,29 @@ impl DockerManager {
                         items_deleted += 1;
                         details.push(format!("[Dry Run] Would remove stopped container '{}'", id));
                     } else {
+                        // Anti-race condition check: Inspect container state immediately before issuing removal
+                        let inspect_out = Command::new(cli)
+                            .args(["inspect", "-f", "{{.State.Running}}", id])
+                            .output();
+
+                        let is_running = match inspect_out {
+                            Ok(out) if out.status.success() => {
+                                String::from_utf8_lossy(&out.stdout).trim().eq_ignore_ascii_case("true")
+                            }
+                            _ => false,
+                        };
+
+                        if is_running {
+                            errors.push(CleanErrorItem {
+                                path: format!("docker:container:{}", id),
+                                error_message: format!(
+                                    "Container '{}' was started after scanning and is actively running. Removal aborted for safety.",
+                                    id
+                                ),
+                            });
+                            continue;
+                        }
+
                         let res = Command::new(cli).args(["rm", id]).output();
                         match res {
                             Ok(out) if out.status.success() => {
