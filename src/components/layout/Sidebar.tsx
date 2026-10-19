@@ -12,7 +12,6 @@ import {
   AppWindow,
   ClockCounterClockwise,
   GearSix,
-  Sparkle,
   HardDrive,
 } from "@phosphor-icons/react";
 
@@ -46,8 +45,8 @@ export const Sidebar: React.FC = () => {
       {/* Brand & Workspace */}
       <div className="space-y-4">
         <div className="flex items-center space-x-2.5 px-3 py-2">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center shadow-lg shadow-indigo-500/20 border border-white/10">
-            <Sparkle size={18} weight="fill" className="text-white" />
+          <div className="w-8 h-8 rounded-lg overflow-hidden flex items-center justify-center shadow-lg shadow-violet-500/20 border border-white/10 bg-[#0D0F18]/80">
+            <img src="/logo.png" alt="myclean logo" className="w-full h-full object-contain p-0.5" />
           </div>
           <div>
             <div className="text-sm font-bold tracking-tight text-white flex items-center space-x-1.5">

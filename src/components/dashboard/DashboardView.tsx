@@ -94,7 +94,7 @@ export const DashboardView: React.FC = () => {
                   </span>
                 </div>
               ) : (
-                <Sparkle size={32} weight="duotone" className="text-indigo-400" />
+                <img src="/logo.png" alt="myclean logo" className="w-11 h-11 object-contain drop-shadow-[0_0_14px_rgba(139,92,246,0.5)]" />
               )}
             </div>
           </div>
