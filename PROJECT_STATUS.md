@@ -346,6 +346,40 @@
 - [x] **Permissive MIT License (`LICENSE`):**
   - Added official MIT open-source license covering myclean contributors.
 
+### Phase 11.1: CleanMyMac-Inspired Smart Scan Experience (Completed)
+- [x] **Native Staged Smart Scan Engine (`src-tauri/src/scanner.rs`):**
+  - Staged category execution across 7 distinct targets: System Cache, Application Cache, Browser Cache, Developer Cache, Logs & Temporary Files, macOS Trash, and Docker Resources.
+  - Off UI-thread traversal with bounded memory and Rayon/atomic metrics.
+  - Real progress calculation strictly derived from actual filesystem and Docker state (no simulated timers or mock percentages). Never emits 100% until engine finishes.
+  - Strict monotonic `overall_progress` guarantee with stage-weighted accumulation.
+  - Structured progress events containing all 13 fields: `session_id`, `category_id`, `current_category`, `current_path`, `phase`, `files_inspected`, `directories_inspected`, `bytes_analyzed`, `items_discovered`, `items_found`, `bytes_found`, `category_status`, `category_progress`, `overall_progress`, `percent_complete`, `skipped_count`, `permission_denied_count`, `elapsed_ms`, `safe_items_count`, `review_items_count`.
+  - Non-blocking emission throttling (minimum 35ms between events or forced on discoveries/transitions).
+  - Sub-millisecond cancellation support across every category and directory walk, emitting `CategoryScanStatus::Partial` without jumping to 100%.
+  - Native Docker CLI/API inspection: detects dangling images and build cache layers safely, skipping gracefully if Docker daemon is stopped without traversing raw VM files.
+- [x] **Safe Docker Prune Routing in Cleaner (`src-tauri/src/cleaner.rs`):**
+  - Routes `docker://dangling-images` and `docker://build-cache` to native Docker CLI prune commands when explicitly confirmed, preserving all other safe Trash routing.
+- [x] **Comprehensive Progress Test Suite (`src-tauri/tests/scanner_progress.rs`):**
+  - 5 automated integration tests verifying progress event structure, monotonicity, category status transitions, mid-scan cancellation partial state, and Docker graceful skip.
+  - **88 tests passing** across all test suites (`cargo test`).
+  - Zero compiler warnings and zero Clippy warnings (`cargo clippy -- -D warnings`).
+- [x] **Smart Scan Centerpiece Component (`src/components/dashboard/SmartScanCenter.tsx`):**
+  - Large SVG circular progress gauge with dual cyan-to-violet gradient (`#06B6D4` -> `#8B5CF6`).
+  - Rotating conic sweep radar beam active during scanning (respects `useReducedMotion`).
+  - Real central live percentage, stage pill, and elapsed time counter.
+  - Dynamic scan states: Idle (Approved Logo), Scanning (Live Metrics & Abort button), Results (Total Recoverable & prominent Review Cleanup button), and Cancelled (Partial recovery).
+- [x] **Category Progress & State Panel (`src/components/dashboard/ScanCategoryPanel.tsx`):**
+  - 7 category cards with dedicated Phosphor icons and color glows.
+  - Live state badges: `Scanning` (cyan spinner), `Completed` (emerald check with byte count), `Skipped` (slate minus), `Partial` (amber warning), `Pending` (clock).
+  - Bottom progress line per category.
+- [x] **Live Discovery Feed (`src/components/dashboard/LiveDiscoveryFeed.tsx`):**
+  - Real-time filesystem inspection stream with smart path abbreviation (`~/Library/Caches/...`).
+  - Live telemetry counters: Safe to Clean, Review Required, and Files Inspected.
+- [x] **Dashboard Integration (`src/components/dashboard/DashboardView.tsx`):**
+  - Seamlessly integrates Smart Scan Center, Category Panel, Live Feed, Hardware Telemetry, and Safety Indicator.
+  - Non-destructive Review Cleanup workflow: never cleans automatically.
+- [x] **TypeScript & Vite Verification:**
+  - `npx tsc --noEmit` and `npm run build` passing with 0 errors.
+
 ### Phase 12: Homebrew Tap & Update Checker (Planned / Next)
 - [ ] Create Homebrew Tap (`gupywant/homebrew-tap`) and Cask formula (`Casks/myclean.rb`).
 - [ ] Implement opt-in GitHub Release update notifier with semantic version comparisons.
