@@ -235,7 +235,7 @@ struct ProgressEmitter<F> {
 
 impl<F: Fn(ScanProgress) + Send + Sync> ProgressEmitter<F> {
     #[allow(clippy::too_many_arguments)]
-    fn emit(
+    fn emit_internal(
         &mut self,
         category_id: &str,
         category_name: &str,
@@ -245,13 +245,14 @@ impl<F: Fn(ScanProgress) + Send + Sync> ProgressEmitter<F> {
         category_progress: f32,
         overall_progress_raw: f32,
         force: bool,
+        is_final: bool,
     ) {
         let now = Instant::now();
         if !force && now.duration_since(self.last_emit).as_millis() < 35 {
             return;
         }
 
-        let overall = if status == CategoryScanStatus::Completed && category_id == "docker" && overall_progress_raw >= 99.9 {
+        let overall = if is_final {
             100.0
         } else {
             overall_progress_raw.max(self.last_overall_progress).min(99.9)
@@ -285,6 +286,50 @@ impl<F: Fn(ScanProgress) + Send + Sync> ProgressEmitter<F> {
         };
 
         (self.callback)(prog);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn emit(
+        &mut self,
+        category_id: &str,
+        category_name: &str,
+        path: &str,
+        phase: &str,
+        status: CategoryScanStatus,
+        category_progress: f32,
+        overall_progress_raw: f32,
+        force: bool,
+    ) {
+        self.emit_internal(
+            category_id,
+            category_name,
+            path,
+            phase,
+            status,
+            category_progress,
+            overall_progress_raw,
+            force,
+            false,
+        );
+    }
+
+    fn emit_final(
+        &mut self,
+        category_id: &str,
+        category_name: &str,
+        phase: &str,
+    ) {
+        self.emit_internal(
+            category_id,
+            category_name,
+            "",
+            phase,
+            CategoryScanStatus::Completed,
+            100.0,
+            100.0,
+            true,
+            true,
+        );
     }
 }
 
@@ -320,17 +365,19 @@ impl Scanner {
             );
         }
 
-        // 3. Active application running check
-        let running_app = SafetyGuard::detect_running_application(path);
-        if let Some(ref app) = running_app {
-            return (
-                "RULE_ACTIVE_APP_RUNNING".into(),
-                format!("Belongs to active application '{}'. Cleaning while running causes corruption or lock conflicts.", app),
-                RiskClassification::ReviewRequired,
-                false,
-                Some(format!("Application '{}' is currently running. Please quit it first.", app)),
-                running_app,
-            );
+        // 3. Active application running check (exempt Docker daemon resources)
+        if category != ScanCategory::Docker {
+            let running_app = SafetyGuard::detect_running_application(path);
+            if let Some(ref app) = running_app {
+                return (
+                    "RULE_ACTIVE_APP_RUNNING".into(),
+                    format!("Belongs to active application '{}'. Cleaning while running causes corruption or lock conflicts.", app),
+                    RiskClassification::ReviewRequired,
+                    false,
+                    Some(format!("Application '{}' is currently running. Please quit it first.", app)),
+                    running_app,
+                );
+            }
         }
 
         // 4. Rule-based classification for supported categories
@@ -409,13 +456,31 @@ impl Scanner {
             ),
             ScanCategory::Docker => (
                 "RULE_DOCKER_CLUTTER".into(),
-                "Untagged dangling Docker images and reusable build cache layers that can be pruned safely.".into(),
+                "Untagged dangling Docker images and reusable build cache layers that can be pruned safely via Docker Studio.".into(),
                 RiskClassification::ReviewRequired,
-                true,
-                None,
+                false,
+                Some("Docker resources require dedicated scope-specific confirmation in Docker Studio".into()),
                 Some("Docker".into()),
             ),
         }
+    }
+
+    /// Checks whether a given path or any of its ancestors or descendants has already been
+    /// registered in the visited set, preventing double counting across overlapping scopes.
+    pub fn is_path_overlapping<P: AsRef<Path>>(path: P, visited: &HashSet<PathBuf>) -> bool {
+        let p = path.as_ref();
+        if visited.contains(p) {
+            return true;
+        }
+        for ancestor in p.ancestors().skip(1) {
+            if visited.contains(ancestor) {
+                return true;
+            }
+        }
+        if visited.iter().any(|v| v.starts_with(p)) {
+            return true;
+        }
+        false
     }
 
     /// Calculate size and file count of a directory or single file without following external symlinks
@@ -682,17 +747,45 @@ impl Scanner {
             review_items_count: 0,
         };
 
-        let total_stages = 7.0f32;
-        let stage_weight = 100.0f32 / total_stages;
+        let stage0_enabled = config.include_system_caches;
+        let stage1_enabled = config.include_system_caches;
+        let stage2_enabled = config.include_browser_caches
+            || config.include_messaging_caches
+            || config.include_mail_downloads;
+        let stage3_enabled = config.include_developer_xcode || config.include_developer_caches;
+        let stage4_enabled = config.include_application_logs;
+        let stage5_enabled = config.include_trash || config.include_large_files;
+        let stage6_enabled = config.include_docker;
 
-        // Helper macro/closure for running target lists through a stage
+        let enabled_stages_count = [
+            stage0_enabled,
+            stage1_enabled,
+            stage2_enabled,
+            stage3_enabled,
+            stage4_enabled,
+            stage5_enabled,
+            stage6_enabled,
+        ]
+        .iter()
+        .filter(|&&e| e)
+        .count();
+
+        let stage_weight = if enabled_stages_count > 0 {
+            100.0f32 / enabled_stages_count as f32
+        } else {
+            0.0f32
+        };
+
+        let mut completed_enabled_stages = 0usize;
+        let mut visited_paths = HashSet::<PathBuf>::new();
+
+        // Helper macro/closure for running target lists through an enabled or skipped stage
         let mut run_stage = |targets: Vec<(ScanCategory, PathBuf, &'static str)>,
-                             stage_idx: usize,
                              stage_id: &'static str,
                              stage_name: &'static str,
                              enabled: bool|
          -> bool {
-            let base_overall = stage_idx as f32 * stage_weight;
+            let base_overall = completed_enabled_stages as f32 * stage_weight;
 
             if cancel_token.load(Ordering::Relaxed) {
                 was_cancelled.store(true, Ordering::Relaxed);
@@ -716,8 +809,8 @@ impl Scanner {
                     "Category disabled in scan configuration",
                     "Skipped",
                     CategoryScanStatus::Skipped,
-                    100.0,
-                    base_overall + stage_weight,
+                    0.0,
+                    base_overall,
                     true,
                 );
                 return true;
@@ -729,13 +822,15 @@ impl Scanner {
                 "Initializing category scope...",
                 "Scanning",
                 CategoryScanStatus::Scanning,
-                0.0,
+                -1.0,
                 base_overall,
                 true,
             );
 
             let total_targets = targets.len();
             if total_targets == 0 {
+                completed_enabled_stages += 1;
+                let new_overall = completed_enabled_stages as f32 * stage_weight;
                 emitter.emit(
                     stage_id,
                     stage_name,
@@ -743,7 +838,7 @@ impl Scanner {
                     "Completed",
                     CategoryScanStatus::Completed,
                     100.0,
-                    base_overall + stage_weight,
+                    new_overall,
                     true,
                 );
                 return true;
@@ -752,14 +847,15 @@ impl Scanner {
             for (k, (cat, path, desc)) in targets.into_iter().enumerate() {
                 if cancel_token.load(Ordering::Relaxed) {
                     was_cancelled.store(true, Ordering::Relaxed);
+                    let cat_prog = (k as f32 / total_targets as f32) * 100.0;
                     emitter.emit(
                         stage_id,
                         stage_name,
                         &path.to_string_lossy(),
                         "Scan Cancelled",
                         CategoryScanStatus::Partial,
-                        (k as f32 / total_targets as f32) * 100.0,
-                        base_overall + ((k as f32 / total_targets as f32) * stage_weight),
+                        cat_prog,
+                        base_overall + ((cat_prog / 100.0) * stage_weight),
                         true,
                     );
                     return false;
@@ -852,6 +948,8 @@ impl Scanner {
                 }
             }
 
+            completed_enabled_stages += 1;
+            let new_overall = completed_enabled_stages as f32 * stage_weight;
             emitter.emit(
                 stage_id,
                 stage_name,
@@ -859,7 +957,7 @@ impl Scanner {
                 "Category Completed",
                 CategoryScanStatus::Completed,
                 100.0,
-                base_overall + stage_weight,
+                new_overall,
                 true,
             );
             true
@@ -872,28 +970,30 @@ impl Scanner {
             if let Ok(entries) = fs::read_dir(&sys_caches) {
                 for entry in entries.flatten() {
                     let p = entry.path();
-                    if !SafetyGuard::is_mandatory_exclusion(&p) {
+                    if !SafetyGuard::is_mandatory_exclusion(&p) && !Self::is_path_overlapping(&p, &visited_paths) {
+                        visited_paths.insert(p.clone());
                         stage0_targets.push((ScanCategory::SystemCaches, p, "System Cache Buffer"));
                     }
                 }
             }
         }
         let sys_updates = PathBuf::from("/Library/Updates");
-        if sys_updates.exists() && !SafetyGuard::is_mandatory_exclusion(&sys_updates) {
+        if sys_updates.exists() && !SafetyGuard::is_mandatory_exclusion(&sys_updates) && !Self::is_path_overlapping(&sys_updates, &visited_paths) {
+            visited_paths.insert(sys_updates.clone());
             stage0_targets.push((ScanCategory::SystemCaches, sys_updates, "System Software Update Cache"));
         }
         for custom in &config.custom_paths {
             let cp = PathBuf::from(custom);
-            if cp.exists() && !SafetyGuard::is_mandatory_exclusion(&cp) && !cp.starts_with(&home) {
+            if cp.exists() && !SafetyGuard::is_mandatory_exclusion(&cp) && !cp.starts_with(&home) && !Self::is_path_overlapping(&cp, &visited_paths) {
+                visited_paths.insert(cp.clone());
                 stage0_targets.push((ScanCategory::SystemCaches, cp, "Custom System Path"));
             }
         }
         let cont = run_stage(
             stage0_targets,
-            0,
             "system_cache",
             "System Cache",
-            config.include_system_caches,
+            stage0_enabled,
         );
 
         // --- STAGE 1: Application Cache ---
@@ -913,17 +1013,30 @@ impl Scanner {
                             || name.contains("Firefox")
                             || name.contains("Microsoft Edge")
                             || name.contains("Arc")
-                            || name.contains("com.vivaldi");
+                            || name.contains("com.vivaldi")
+                            || name.contains("Chromium")
+                            || name.contains("com.operasoftware");
                         let is_msg = name.contains("Slack")
                             || name.contains("Discord")
                             || name.contains("Telegram")
                             || name.contains("Teams")
-                            || name.contains("com.tinyspeck.slackmacgap");
+                            || name.contains("com.tinyspeck.slackmacgap")
+                            || name.contains("WhatsApp")
+                            || name.contains("Signal")
+                            || name.contains("WeChat");
                         let is_dev = name.contains("Homebrew")
                             || name.contains("CocoaPods")
-                            || name.contains("Yarn");
+                            || name.contains("Yarn")
+                            || name.contains("npm")
+                            || name.contains("pnpm")
+                            || name.contains("pip")
+                            || name.contains("deno")
+                            || name.contains("gradle")
+                            || name.contains("cargo")
+                            || name.contains("JetBrains");
 
-                        if !is_browser && !is_msg && !is_dev {
+                        if !is_browser && !is_msg && !is_dev && !Self::is_path_overlapping(&path, &visited_paths) {
+                            visited_paths.insert(path.clone());
                             stage1_targets.push((
                                 ScanCategory::SystemCaches,
                                 path,
@@ -935,10 +1048,9 @@ impl Scanner {
             }
             let cont = run_stage(
                 stage1_targets,
-                1,
                 "app_cache",
                 "Application Cache",
-                config.include_system_caches,
+                stage1_enabled,
             );
 
             // --- STAGE 2: Browser Cache ---
@@ -950,27 +1062,33 @@ impl Scanner {
                             let path = entry.path();
                             let name = entry.file_name().to_string_lossy().to_string();
 
-                            if (name.contains("Google")
+                            let is_browser = name.contains("Google")
                                 || name.contains("Brave")
                                 || name.contains("Safari")
                                 || name.contains("Firefox")
                                 || name.contains("Microsoft Edge")
                                 || name.contains("Arc")
-                                || name.contains("com.vivaldi"))
-                                && config.include_browser_caches
-                            {
+                                || name.contains("com.vivaldi")
+                                || name.contains("Chromium")
+                                || name.contains("com.operasoftware");
+                            let is_msg = name.contains("Slack")
+                                || name.contains("Discord")
+                                || name.contains("Telegram")
+                                || name.contains("Teams")
+                                || name.contains("com.tinyspeck.slackmacgap")
+                                || name.contains("WhatsApp")
+                                || name.contains("Signal")
+                                || name.contains("WeChat");
+
+                            if is_browser && config.include_browser_caches && !Self::is_path_overlapping(&path, &visited_paths) {
+                                visited_paths.insert(path.clone());
                                 stage2_targets.push((
                                     ScanCategory::BrowserCaches,
                                     path,
                                     "Browser Web Cache",
                                 ));
-                            } else if (name.contains("Slack")
-                                || name.contains("Discord")
-                                || name.contains("Telegram")
-                                || name.contains("Teams")
-                                || name.contains("com.tinyspeck.slackmacgap"))
-                                && config.include_messaging_caches
-                            {
+                            } else if is_msg && config.include_messaging_caches && !Self::is_path_overlapping(&path, &visited_paths) {
+                                visited_paths.insert(path.clone());
                                 stage2_targets.push((
                                     ScanCategory::MessagingCaches,
                                     path,
@@ -983,7 +1101,8 @@ impl Scanner {
                 if config.include_mail_downloads {
                     let mail_downloads = home
                         .join("Library/Containers/com.apple.mail/Data/Library/Mail Downloads");
-                    if mail_downloads.exists() {
+                    if mail_downloads.exists() && !Self::is_path_overlapping(&mail_downloads, &visited_paths) {
+                        visited_paths.insert(mail_downloads.clone());
                         stage2_targets.push((
                             ScanCategory::MailDownloads,
                             mail_downloads,
@@ -993,10 +1112,9 @@ impl Scanner {
                 }
                 let cont = run_stage(
                     stage2_targets,
-                    2,
                     "browser_cache",
                     "Browser Cache",
-                    config.include_browser_caches || config.include_messaging_caches,
+                    stage2_enabled,
                 );
 
                 // --- STAGE 3: Developer Cache ---
@@ -1004,7 +1122,8 @@ impl Scanner {
                     let mut stage3_targets = Vec::new();
                     if config.include_developer_xcode {
                         let xcode_derived = home.join("Library/Developer/Xcode/DerivedData");
-                        if xcode_derived.exists() {
+                        if xcode_derived.exists() && !Self::is_path_overlapping(&xcode_derived, &visited_paths) {
+                            visited_paths.insert(xcode_derived.clone());
                             stage3_targets.push((
                                 ScanCategory::DeveloperXcode,
                                 xcode_derived,
@@ -1012,7 +1131,8 @@ impl Scanner {
                             ));
                         }
                         let xcode_archives = home.join("Library/Developer/Xcode/Archives");
-                        if xcode_archives.exists() {
+                        if xcode_archives.exists() && !Self::is_path_overlapping(&xcode_archives, &visited_paths) {
+                            visited_paths.insert(xcode_archives.clone());
                             stage3_targets.push((
                                 ScanCategory::DeveloperXcode,
                                 xcode_archives,
@@ -1020,7 +1140,8 @@ impl Scanner {
                             ));
                         }
                         let xcode_device = home.join("Library/Developer/Xcode/iOS DeviceSupport");
-                        if xcode_device.exists() {
+                        if xcode_device.exists() && !Self::is_path_overlapping(&xcode_device, &visited_paths) {
+                            visited_paths.insert(xcode_device.clone());
                             stage3_targets.push((
                                 ScanCategory::DeveloperXcode,
                                 xcode_device,
@@ -1030,85 +1151,29 @@ impl Scanner {
                     }
 
                     if config.include_developer_caches {
-                        let cargo_registry = home.join(".cargo/registry/cache");
-                        if cargo_registry.exists() {
-                            stage3_targets.push((
-                                ScanCategory::DeveloperCaches,
-                                cargo_registry,
-                                "Rust Cargo Registry .crate Archives",
-                            ));
-                        }
-                        let cargo_cache = home.join(".cargo/cache");
-                        if cargo_cache.exists() {
-                            stage3_targets.push((
-                                ScanCategory::DeveloperCaches,
-                                cargo_cache,
-                                "Rust Cargo Cache",
-                            ));
-                        }
-                        let gradle_cache = home.join(".gradle/caches");
-                        if gradle_cache.exists() {
-                            stage3_targets.push((
-                                ScanCategory::DeveloperCaches,
-                                gradle_cache,
-                                "Gradle Dependency Caches",
-                            ));
-                        }
-                        let cocoapods_cache = home.join("Library/Caches/CocoaPods");
-                        if cocoapods_cache.exists() {
-                            stage3_targets.push((
-                                ScanCategory::DeveloperCaches,
-                                cocoapods_cache,
-                                "CocoaPods Specs & Pod Archives",
-                            ));
-                        }
-                        let yarn_cache = home.join("Library/Caches/Yarn");
-                        if yarn_cache.exists() {
-                            stage3_targets.push((
-                                ScanCategory::DeveloperCaches,
-                                yarn_cache,
-                                "Yarn Package Cache",
-                            ));
-                        }
-                        let yarn_dotcache = home.join(".cache/yarn");
-                        if yarn_dotcache.exists() {
-                            stage3_targets.push((
-                                ScanCategory::DeveloperCaches,
-                                yarn_dotcache,
-                                "Yarn Global Cache",
-                            ));
-                        }
-                        let npm_cache = home.join(".npm/_cacache");
-                        if npm_cache.exists() {
-                            stage3_targets.push((
-                                ScanCategory::DeveloperCaches,
-                                npm_cache,
-                                "NPM Package Cache",
-                            ));
-                        }
-                        let pnpm_cache = home.join("Library/pnpm/store");
-                        if pnpm_cache.exists() {
-                            stage3_targets.push((
-                                ScanCategory::DeveloperCaches,
-                                pnpm_cache,
-                                "pnpm Store Cache",
-                            ));
-                        }
-                        let brew_cache = home.join("Library/Caches/Homebrew");
-                        if brew_cache.exists() {
-                            stage3_targets.push((
-                                ScanCategory::DeveloperCaches,
-                                brew_cache,
-                                "Homebrew Formula & Bottle Caches",
-                            ));
+                        let dev_paths = [
+                            (home.join(".cargo/registry/cache"), "Rust Cargo Registry .crate Archives"),
+                            (home.join(".cargo/cache"), "Rust Cargo Cache"),
+                            (home.join(".gradle/caches"), "Gradle Dependency Caches"),
+                            (home.join("Library/Caches/CocoaPods"), "CocoaPods Specs & Pod Archives"),
+                            (home.join("Library/Caches/Yarn"), "Yarn Package Cache"),
+                            (home.join(".cache/yarn"), "Yarn Global Cache"),
+                            (home.join(".npm/_cacache"), "NPM Package Cache"),
+                            (home.join("Library/pnpm/store"), "pnpm Store Cache"),
+                            (home.join("Library/Caches/Homebrew"), "Homebrew Formula & Bottle Caches"),
+                        ];
+                        for (p, desc) in dev_paths {
+                            if p.exists() && !Self::is_path_overlapping(&p, &visited_paths) {
+                                visited_paths.insert(p.clone());
+                                stage3_targets.push((ScanCategory::DeveloperCaches, p, desc));
+                            }
                         }
                     }
                     let cont = run_stage(
                         stage3_targets,
-                        3,
                         "developer_cache",
                         "Developer Cache",
-                        config.include_developer_xcode || config.include_developer_caches,
+                        stage3_enabled,
                     );
 
                     // --- STAGE 4: Logs & Temporary Files ---
@@ -1116,22 +1181,24 @@ impl Scanner {
                         let mut stage4_targets = Vec::new();
                         let user_logs = home.join("Library/Logs");
                         if user_logs.exists() {
-                            stage4_targets.push((
-                                ScanCategory::ApplicationLogs,
-                                user_logs,
-                                "User Application Logs",
-                            ));
-                        }
-                        let diag_reports = home.join("Library/Logs/DiagnosticReports");
-                        if diag_reports.exists() {
-                            stage4_targets.push((
-                                ScanCategory::ApplicationLogs,
-                                diag_reports,
-                                "System Diagnostic & Crash Reports",
-                            ));
+                            if let Ok(entries) = fs::read_dir(&user_logs) {
+                                for entry in entries.flatten() {
+                                    let p = entry.path();
+                                    if !SafetyGuard::is_mandatory_exclusion(&p) && !Self::is_path_overlapping(&p, &visited_paths) {
+                                        visited_paths.insert(p.clone());
+                                        let desc = if p.ends_with("DiagnosticReports") {
+                                            "System Diagnostic & Crash Reports"
+                                        } else {
+                                            "User Application Logs"
+                                        };
+                                        stage4_targets.push((ScanCategory::ApplicationLogs, p, desc));
+                                    }
+                                }
+                            }
                         }
                         let sys_diag = PathBuf::from("/Library/Logs/DiagnosticReports");
-                        if sys_diag.exists() && !SafetyGuard::is_mandatory_exclusion(&sys_diag) {
+                        if sys_diag.exists() && !SafetyGuard::is_mandatory_exclusion(&sys_diag) && !Self::is_path_overlapping(&sys_diag, &visited_paths) {
+                            visited_paths.insert(sys_diag.clone());
                             stage4_targets.push((
                                 ScanCategory::ApplicationLogs,
                                 sys_diag,
@@ -1140,38 +1207,35 @@ impl Scanner {
                         }
                         let cont = run_stage(
                             stage4_targets,
-                            4,
                             "logs_and_temp",
                             "Logs & Temporary Files",
-                            config.include_application_logs,
+                            stage4_enabled,
                         );
 
                         // --- STAGE 5: macOS Trash & Large Files ---
                         if cont {
                             let mut stage5_targets = Vec::new();
-                            let trash_dir = home.join(".Trash");
-                            if trash_dir.exists() {
-                                if let Ok(entries) = fs::read_dir(&trash_dir) {
-                                    for entry in entries.flatten() {
-                                        let p = entry.path();
-                                        stage5_targets.push((
-                                            ScanCategory::UserTrash,
-                                            p,
-                                            "macOS Trash Bin Item",
-                                        ));
+                            if config.include_trash {
+                                let trash_dir = home.join(".Trash");
+                                if trash_dir.exists() {
+                                    if let Ok(entries) = fs::read_dir(&trash_dir) {
+                                        for entry in entries.flatten() {
+                                            let p = entry.path();
+                                            if !Self::is_path_overlapping(&p, &visited_paths) {
+                                                visited_paths.insert(p.clone());
+                                                stage5_targets.push((
+                                                    ScanCategory::UserTrash,
+                                                    p,
+                                                    "macOS Trash Bin Item",
+                                                ));
+                                            }
+                                        }
                                     }
                                 }
                             }
-                            let cont = run_stage(
-                                stage5_targets,
-                                5,
-                                "user_trash",
-                                "macOS Trash",
-                                config.include_trash,
-                            );
 
                             // Inspect Large Files in Downloads if configured
-                            if cont && config.include_large_files && !cancel_token.load(Ordering::Relaxed) {
+                            if config.include_large_files && !cancel_token.load(Ordering::Relaxed) {
                                 let threshold_bytes =
                                     config.large_files_min_mb.unwrap_or(100) * 1024 * 1024;
                                 let downloads = home.join("Downloads");
@@ -1208,60 +1272,16 @@ impl Scanner {
                                             if let Ok(meta) = p.symlink_metadata() {
                                                 let alloc = meta.blocks() * 512;
                                                 let logical = meta.len();
-                                                if logical >= threshold_bytes
-                                                    || alloc >= threshold_bytes
+                                                if (logical >= threshold_bytes
+                                                    || alloc >= threshold_bytes)
+                                                    && !Self::is_path_overlapping(p, &visited_paths)
                                                 {
-                                                    let name = p
-                                                        .file_name()
-                                                        .unwrap_or_default()
-                                                        .to_string_lossy()
-                                                        .to_string();
-                                                    let modified_at = meta
-                                                        .modified()
-                                                        .ok()
-                                                        .map(|t| {
-                                                            chrono::DateTime::<chrono::Utc>::from(
-                                                                t,
-                                                            )
-                                                            .to_rfc3339()
-                                                        });
-                                                    let (
-                                                        detection_rule_id,
-                                                        disposable_reason,
-                                                        classification,
-                                                        is_eligible_for_cleanup,
-                                                        ineligibility_reason,
-                                                        associated_app,
-                                                    ) = Self::classify_candidate_rule(
+                                                    visited_paths.insert(p.to_path_buf());
+                                                    stage5_targets.push((
                                                         ScanCategory::LargeFiles,
-                                                        p,
-                                                    );
-                                                    let item = ScanItem {
-                                                        id: format!("large:{}", p.to_string_lossy()),
-                                                        path: p.to_string_lossy().to_string(),
-                                                        name,
-                                                        category: ScanCategory::LargeFiles,
-                                                        size_bytes: alloc,
-                                                        allocated_bytes: alloc,
-                                                        logical_bytes: logical,
-                                                        file_count: 1,
-                                                        modified_at,
-                                                        description:
-                                                            "Large file located in Downloads folder"
-                                                                .into(),
-                                                        is_safe_to_clean: false,
-                                                        is_selected: false,
-                                                        classification,
-                                                        detection_rule_id,
-                                                        disposable_reason,
-                                                        is_eligible_for_cleanup,
-                                                        ineligibility_reason,
-                                                        associated_app,
-                                                    };
-                                                    emitter.review_items_count += 1;
-                                                    emitter.discovered_items += 1;
-                                                    emitter.discovered_bytes += alloc;
-                                                    items_collector.lock().unwrap().push(item);
+                                                        p.to_path_buf(),
+                                                        "Large file located in Downloads folder",
+                                                    ));
                                                 }
                                             }
                                         }
@@ -1269,18 +1289,25 @@ impl Scanner {
                                 }
                             }
 
+                            let cont = run_stage(
+                                stage5_targets,
+                                "user_trash",
+                                "macOS Trash",
+                                stage5_enabled,
+                            );
+
                             // --- STAGE 6: Docker Resources ---
                             if cont {
-                                let stage6_base = 6.0 * stage_weight;
-                                if !config.include_docker {
+                                let base_overall = completed_enabled_stages as f32 * stage_weight;
+                                if !stage6_enabled {
                                     emitter.emit(
                                         "docker",
                                         "Docker Resources",
                                         "Docker scanning disabled in configuration",
                                         "Skipped",
                                         CategoryScanStatus::Skipped,
-                                        100.0,
-                                        stage6_base + stage_weight,
+                                        0.0,
+                                        base_overall,
                                         true,
                                     );
                                 } else {
@@ -1290,8 +1317,8 @@ impl Scanner {
                                         "Checking Docker CLI & daemon status...",
                                         "Scanning",
                                         CategoryScanStatus::Scanning,
-                                        10.0,
-                                        stage6_base + 2.0,
+                                        -1.0,
+                                        base_overall,
                                         true,
                                     );
 
@@ -1302,14 +1329,16 @@ impl Scanner {
                                         } else {
                                             "Docker daemon is not running (skipped safely)"
                                         };
+                                        completed_enabled_stages += 1;
+                                        let new_overall = completed_enabled_stages as f32 * stage_weight;
                                         emitter.emit(
                                             "docker",
                                             "Docker Resources",
                                             skip_msg,
                                             "Skipped",
                                             CategoryScanStatus::Skipped,
-                                            100.0,
-                                            stage6_base + stage_weight,
+                                            0.0,
+                                            new_overall,
                                             true,
                                         );
                                     } else {
@@ -1319,8 +1348,8 @@ impl Scanner {
                                             "Inspecting Docker storage & dangling images...",
                                             "Scanning",
                                             CategoryScanStatus::Scanning,
-                                            50.0,
-                                            stage6_base + 7.0,
+                                            -1.0,
+                                            base_overall + (0.5 * stage_weight),
                                             true,
                                         );
 
@@ -1349,9 +1378,9 @@ impl Scanner {
                                                     is_selected: false,
                                                     classification: RiskClassification::ReviewRequired,
                                                     detection_rule_id: "RULE_DOCKER_DANGLING_IMAGES".into(),
-                                                    disposable_reason: "Dangling layers left over from builds. Safe to prune.".into(),
-                                                    is_eligible_for_cleanup: true,
-                                                    ineligibility_reason: None,
+                                                    disposable_reason: "Dangling layers left over from builds. Safe to prune via Docker Studio.".into(),
+                                                    is_eligible_for_cleanup: false,
+                                                    ineligibility_reason: Some("Docker resources require dedicated scope-specific confirmation in Docker Studio".into()),
                                                     associated_app: Some("Docker".into()),
                                                 };
                                                 emitter.review_items_count += 1;
@@ -1377,9 +1406,9 @@ impl Scanner {
                                                     is_selected: false,
                                                     classification: RiskClassification::ReviewRequired,
                                                     detection_rule_id: "RULE_DOCKER_BUILD_CACHE".into(),
-                                                    disposable_reason: "Build cache layers are regenerated on future docker build runs.".into(),
-                                                    is_eligible_for_cleanup: true,
-                                                    ineligibility_reason: None,
+                                                    disposable_reason: "Build cache layers can be pruned via Docker Studio.".into(),
+                                                    is_eligible_for_cleanup: false,
+                                                    ineligibility_reason: Some("Docker resources require dedicated scope-specific confirmation in Docker Studio".into()),
                                                     associated_app: Some("Docker".into()),
                                                 };
                                                 emitter.review_items_count += 1;
@@ -1389,6 +1418,8 @@ impl Scanner {
                                             }
                                         }
 
+                                        completed_enabled_stages += 1;
+                                        let new_overall = completed_enabled_stages as f32 * stage_weight;
                                         emitter.emit(
                                             "docker",
                                             "Docker Resources",
@@ -1396,7 +1427,7 @@ impl Scanner {
                                             "Completed",
                                             CategoryScanStatus::Completed,
                                             100.0,
-                                            100.0,
+                                            new_overall,
                                             true,
                                         );
                                     }
@@ -1410,15 +1441,36 @@ impl Scanner {
 
         // Final completion event strictly if not cancelled
         if !was_cancelled.load(Ordering::Relaxed) {
-            emitter.emit(
-                "docker",
-                "Docker Resources",
-                "System scan complete",
+            let last_category_id = if stage6_enabled {
+                "docker"
+            } else if stage5_enabled {
+                "user_trash"
+            } else if stage4_enabled {
+                "logs_and_temp"
+            } else if stage3_enabled {
+                "developer_cache"
+            } else if stage2_enabled {
+                "browser_cache"
+            } else if stage1_enabled {
+                "app_cache"
+            } else {
+                "system_cache"
+            };
+
+            let last_category_name = match last_category_id {
+                "docker" => "Docker Resources",
+                "user_trash" => "macOS Trash",
+                "logs_and_temp" => "Logs & Temporary Files",
+                "developer_cache" => "Developer Cache",
+                "browser_cache" => "Browser Cache",
+                "app_cache" => "Application Cache",
+                _ => "System Cache",
+            };
+
+            emitter.emit_final(
+                last_category_id,
+                last_category_name,
                 "Analysis Complete",
-                CategoryScanStatus::Completed,
-                100.0,
-                100.0,
-                true,
             );
         }
 
@@ -1592,5 +1644,41 @@ mod tests {
         assert_eq!(count, 1);
 
         let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn test_classify_candidate_rule_docker_review_required_and_ineligible() {
+        let path = Path::new("/dummy/docker/path");
+        let (rule_id, _desc, risk, eligible, inelig_reason, app) =
+            Scanner::classify_candidate_rule(ScanCategory::Docker, path);
+        assert_eq!(rule_id, "RULE_DOCKER_CLUTTER");
+        assert_eq!(risk, RiskClassification::ReviewRequired);
+        assert!(!eligible, "Docker clutter must be marked ineligible for generic cleaner");
+        assert!(
+            inelig_reason.as_deref().unwrap_or_default().contains("Docker Studio"),
+            "Expected ineligibility reason mentioning Docker Studio"
+        );
+        assert_eq!(app, Some("Docker".into()));
+    }
+
+    #[test]
+    fn test_is_path_overlapping_detection() {
+        let mut visited = HashSet::new();
+        visited.insert(PathBuf::from("/Users/user/Library/Caches/Google"));
+        visited.insert(PathBuf::from("/Users/user/Library/Logs"));
+
+        // Exact match
+        assert!(Scanner::is_path_overlapping(Path::new("/Users/user/Library/Caches/Google"), &visited));
+
+        // Child of visited
+        assert!(Scanner::is_path_overlapping(Path::new("/Users/user/Library/Caches/Google/Chrome/Cache"), &visited));
+        assert!(Scanner::is_path_overlapping(Path::new("/Users/user/Library/Logs/DiagnosticReports"), &visited));
+
+        // Parent of visited (covering it)
+        assert!(Scanner::is_path_overlapping(Path::new("/Users/user/Library/Caches"), &visited));
+
+        // Non-overlapping sibling
+        assert!(!Scanner::is_path_overlapping(Path::new("/Users/user/Library/Caches/Spotify"), &visited));
+        assert!(!Scanner::is_path_overlapping(Path::new("/Users/user/Downloads/file.zip"), &visited));
     }
 }

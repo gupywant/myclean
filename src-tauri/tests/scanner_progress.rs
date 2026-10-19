@@ -197,3 +197,102 @@ fn test_scanner_docker_graceful_skip() {
         last.category_status
     );
 }
+
+#[test]
+fn test_disabled_stages_do_not_advance_overall_progress() {
+    let cancel = Arc::new(AtomicBool::new(false));
+    let recorded_events = Arc::new(Mutex::new(Vec::<ScanProgress>::new()));
+    let recorded_events_clone = recorded_events.clone();
+
+    // Only system_caches enabled, all others disabled
+    let config = ScanScopeConfig {
+        include_system_caches: true,
+        include_application_logs: false,
+        include_developer_xcode: false,
+        include_developer_caches: false,
+        include_browser_caches: false,
+        include_messaging_caches: false,
+        include_trash: false,
+        include_mail_downloads: false,
+        include_large_files: false,
+        include_docker: false,
+        large_files_min_mb: None,
+        custom_paths: Vec::new(),
+        user_exclusions: Vec::new(),
+    };
+
+    let result = Scanner::scan_with_config(config, cancel, move |p| {
+        recorded_events_clone.lock().unwrap().push(p);
+    });
+
+    assert!(!result.was_cancelled);
+    let events = recorded_events.lock().unwrap();
+
+    // Verify skipped events:
+    let skipped_events: Vec<&ScanProgress> = events
+        .iter()
+        .filter(|e| e.category_status == CategoryScanStatus::Skipped)
+        .collect();
+
+    assert!(!skipped_events.is_empty(), "Must have skipped events for disabled categories");
+    for s in skipped_events {
+        assert_eq!(
+            s.category_progress, 0.0,
+            "Skipped category must report 0.0 category progress, got: {}",
+            s.category_progress
+        );
+    }
+}
+
+#[test]
+fn test_indeterminate_progress_on_initialization() {
+    let cancel = Arc::new(AtomicBool::new(false));
+    let had_indeterminate = Arc::new(AtomicBool::new(false));
+    let had_indeterminate_clone = had_indeterminate.clone();
+
+    let config = ScanScopeConfig::default();
+    let _ = Scanner::scan_with_config(config, cancel, move |p| {
+        if p.category_progress == -1.0 {
+            had_indeterminate_clone.store(true, Ordering::Relaxed);
+        }
+    });
+
+    assert!(
+        had_indeterminate.load(Ordering::Relaxed),
+        "Scanner must emit indeterminate progress (-1.0) during initial category scope checks"
+    );
+}
+
+#[test]
+fn test_non_overlapping_cache_accounting_regression() {
+    use std::collections::HashSet;
+    use std::path::{Path, PathBuf};
+
+    let mut visited_paths = HashSet::new();
+
+    // Given parent /Library/Logs
+    let logs_dir = PathBuf::from("/Library/Logs");
+    visited_paths.insert(logs_dir.clone());
+
+    // Subdirectory DiagnosticReports MUST be detected as overlapping
+    let diag_reports = logs_dir.join("DiagnosticReports");
+    assert!(
+        Scanner::is_path_overlapping(&diag_reports, &visited_paths),
+        "DiagnosticReports must be detected as overlapping with parent /Library/Logs"
+    );
+
+    // Parent directory /Library MUST be detected as overlapping
+    let lib_dir = Path::new("/Library");
+    assert!(
+        Scanner::is_path_overlapping(lib_dir, &visited_paths),
+        "/Library must be detected as overlapping because child /Library/Logs is visited"
+    );
+
+    // Independent path must not overlap
+    let unrelated = Path::new("/Library/Caches");
+    assert!(
+        !Scanner::is_path_overlapping(unrelated, &visited_paths),
+        "/Library/Caches must not overlap with /Library/Logs"
+    );
+}
+
