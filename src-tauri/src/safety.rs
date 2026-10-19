@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use sysinfo::{ProcessesToUpdate, System};
 use thiserror::Error;
@@ -22,6 +23,10 @@ pub enum SafetyError {
     Whitelisted(String),
     #[error("Target path contains persistent database or application state: {0}")]
     DatabaseOrPersistentState(String),
+    #[error("Mandatory system exclusions cannot be modified or removed: {0}")]
+    MandatoryExclusionCannotBeRemoved(String),
+    #[error("Custom exclusion is invalid or redundant: {0}")]
+    InvalidExclusion(String),
     #[error("Filesystem IO error: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -88,9 +93,108 @@ const USER_DOCUMENT_DIRECTORIES: &[&str] = &[
     "Library/Mobile Documents", // iCloud Drive
 ];
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MandatoryExclusionInfo {
+    pub path: String,
+    pub category: String,
+    pub explanation: String,
+    pub is_system_level: bool,
+}
+
 pub struct SafetyGuard;
 
 impl SafetyGuard {
+    /// Returns the full list of mandatory exclusions with human-friendly descriptions.
+    pub fn get_mandatory_exclusions() -> Vec<MandatoryExclusionInfo> {
+        let mut list = Vec::new();
+
+        // System SIP / Core
+        let sys_items = [
+            ("/System", "SIP System Files", "macOS System Integrity Protection root filesystem"),
+            ("/usr", "macOS Core Utilities", "Protected operating system command-line utilities and libraries"),
+            ("/bin", "macOS System Binaries", "Essential root system command binaries"),
+            ("/sbin", "macOS System Admin Binaries", "System administrative daemons and utilities"),
+            ("/private/etc", "System Configurations", "Core macOS networking and daemon configuration files"),
+            ("/Library/Apple", "Apple System Assets", "Apple security components and system runtime signatures"),
+            ("/Library/Security", "Security Framework", "macOS trust settings, keychain daemons, and certificates"),
+            ("/Library/Keychains", "System Keychains", "System-wide certificate stores and security roots"),
+            ("/Volumes", "Mounted Storage", "External volumes, disk images, and remote file shares"),
+        ];
+
+        for (path, cat, exp) in sys_items {
+            list.push(MandatoryExclusionInfo {
+                path: path.to_string(),
+                category: cat.to_string(),
+                explanation: exp.to_string(),
+                is_system_level: true,
+            });
+        }
+
+        // User Identity & Documents
+        if let Some(home) = dirs::home_dir() {
+            let user_items = [
+                ("Library/Keychains", "User Keychains", "User password store, encrypted tokens, and certificates"),
+                ("Library/Mail", "Apple Mail", "Local email databases, attachments, and mailbox accounts"),
+                ("Library/Messages", "iMessage Store", "iMessage conversations, attachments, and sync database"),
+                ("Library/Containers/com.docker.docker/Data/vms", "Docker VM Storage", "Docker Desktop VM virtual disk files (Docker.raw)"),
+                ("Documents", "User Documents", "Personal user work documents and project files"),
+                ("Desktop", "User Desktop", "Personal desktop files and active workspace items"),
+                ("Pictures", "Photos & Pictures", "Personal photos, image libraries, and graphics"),
+                ("Music", "Music & Audio", "Personal audio files and Music application library"),
+                ("Movies", "Movies & Video", "Personal video projects and movie recordings"),
+                (".ssh", "SSH Credentials", "SSH private/public key pairs and server known hosts"),
+                (".gnupg", "GnuPG Keys", "GPG cryptographic keys and trust databases"),
+                ("Library/Mobile Documents", "iCloud Drive", "iCloud synchronized files and cloud documents"),
+            ];
+
+            for (sub, cat, exp) in user_items {
+                let full_path = home.join(sub).to_string_lossy().to_string();
+                list.push(MandatoryExclusionInfo {
+                    path: full_path,
+                    category: cat.to_string(),
+                    explanation: exp.to_string(),
+                    is_system_level: false,
+                });
+            }
+        }
+
+        list
+    }
+
+    /// Validates whether a candidate path can be added as a custom user exclusion.
+    /// Rejects traversal, empty paths, root, and paths already protected by mandatory rules.
+    pub fn validate_custom_exclusion_candidate(path_str: &str) -> Result<PathBuf, SafetyError> {
+        let trimmed = path_str.trim();
+        if trimmed.is_empty() {
+            return Err(SafetyError::InvalidExclusion("Exclusion path cannot be empty".into()));
+        }
+
+        Self::check_path_traversal(trimmed)?;
+
+        let p = PathBuf::from(trimmed);
+        if trimmed == "/" {
+            return Err(SafetyError::InvalidExclusion("Root '/' cannot be added as a custom exclusion".into()));
+        }
+
+        // Check if path is already covered by mandatory system protection
+        if Self::is_system_protected(&p) {
+            return Err(SafetyError::InvalidExclusion(format!(
+                "'{}' is already permanently protected by macOS SIP and cannot be modified",
+                trimmed
+            )));
+        }
+
+        // Check if path is already covered by mandatory user data protection
+        if Self::is_user_data_protected(&p) {
+            return Err(SafetyError::InvalidExclusion(format!(
+                "'{}' is already permanently protected by user privacy policies",
+                trimmed
+            )));
+        }
+
+        Ok(p)
+    }
+
     /// Validates whether a path is strictly prohibited from any cleaning operations.
     pub fn is_system_protected<P: AsRef<Path>>(path: P) -> bool {
         let p = path.as_ref();
