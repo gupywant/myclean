@@ -2,7 +2,10 @@ use crate::apps::{
     AppInspector, CleanOrphanedRequest, InstalledApp, OrphanedScanResult, UninstallAppRequest,
 };
 use crate::cleaner::{ActiveAppWarning, CleanRequest, CleanResult, Cleaner};
-use crate::db::{CleanupRecord, Database, ScanRecord, WhitelistEntry};
+use crate::db::{
+    AppPreferences, CleanupAnalyticsSummary, CleanupRecord, Database, DatabaseHealthReport,
+    ExclusionDescriptor, HistoryQueryRequest, HistoryQueryResponse, ScanRecord, WhitelistEntry,
+};
 use crate::developer::{
     DeveloperArtifactItem, DeveloperCleanRequest, DeveloperEngine, DeveloperScanResult,
 };
@@ -10,6 +13,7 @@ use crate::docker::{
     DockerCleanRequest, DockerCleanResult, DockerManager, DockerScanResult,
 };
 use crate::duplicates::{CleanDuplicatesRequest, DuplicateScanProgress, DuplicateScanResult, DuplicateScanner};
+use crate::notifications::NotificationManager;
 use crate::scanner::{ScanProgress, ScanResult, ScanScopeConfig, Scanner};
 use crate::storage::{StorageAnalysisResult, StorageAnalyzer};
 use crate::system::{SystemSummary, SystemTelemetry};
@@ -44,7 +48,15 @@ pub async fn start_scan(
     state.scan_cancel_token.store(false, Ordering::Relaxed);
     let cancel = state.scan_cancel_token.clone();
     let db = state.db.clone();
-    let scan_config = config.unwrap_or_default();
+    let mut scan_config = config.unwrap_or_default();
+
+    // Invariant: Merge all exclusions from SQLite so custom exclusions are always honored
+    let stored_exclusions = db.get_all_exclusion_paths();
+    for excl in stored_exclusions {
+        if !scan_config.user_exclusions.contains(&excl) {
+            scan_config.user_exclusions.push(excl);
+        }
+    }
 
     let result = tokio::task::spawn_blocking(move || {
         let app_handle = app.clone();
@@ -63,6 +75,18 @@ pub async fn start_scan(
                 category_breakdown_json: serde_json::to_string(&res.categories).unwrap_or_else(|_| "[]".into()),
             };
             let _ = db.insert_scan_record(&record);
+
+            // Dispatch notification if enabled in preferences
+            if let Ok(prefs) = db.get_preferences() {
+                if prefs.notify_scan_complete {
+                    let msg = format!(
+                        "Scan complete: {} items analyzed ({:.1} MB).",
+                        res.total_items,
+                        res.total_bytes as f64 / 1_048_576.0
+                    );
+                    let _ = NotificationManager::send("myclean", Some("Smart Scan"), &msg);
+                }
+            }
         }
 
         res
@@ -87,9 +111,25 @@ pub async fn clean_items(
     state.clean_cancel_token.store(false, Ordering::Relaxed);
     let cancel = state.clean_cancel_token.clone();
     let db = state.db.clone();
-    tokio::task::spawn_blocking(move || Cleaner::clean_items(request, &db, cancel))
+    let res = tokio::task::spawn_blocking(move || Cleaner::clean_items(request, &db, cancel))
         .await
-        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())??;
+
+    // Dispatch notification if configured in user preferences
+    if let Ok(prefs) = state.db.get_preferences() {
+        if prefs.notify_clean_complete && res.success {
+            let msg = if res.dry_run {
+                format!("Simulation complete: {} items evaluated.", res.items_deleted)
+            } else {
+                format!("Cleaned {} items. Moved to macOS Trash.", res.items_deleted)
+            };
+            let _ = NotificationManager::send("myclean", Some("Cleanup Complete"), &msg);
+        } else if prefs.notify_clean_failure && !res.success {
+            let _ = NotificationManager::send("myclean", Some("Cleanup Notice"), "Some items could not be moved to Trash.");
+        }
+    }
+
+    Ok(res)
 }
 
 #[tauri::command]
@@ -259,6 +299,96 @@ pub fn set_app_setting(
     value: String,
 ) -> Result<(), String> {
     state.db.set_setting(&key, &value).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_preferences(state: State<'_, AppState>) -> Result<AppPreferences, String> {
+    state.db.get_preferences().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn update_preferences(
+    state: State<'_, AppState>,
+    preferences: AppPreferences,
+) -> Result<AppPreferences, String> {
+    state.db.update_preferences(preferences).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_all_exclusions(state: State<'_, AppState>) -> Result<Vec<ExclusionDescriptor>, String> {
+    state.db.get_all_exclusions().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn add_custom_exclusion(
+    state: State<'_, AppState>,
+    path: String,
+    reason: String,
+) -> Result<ExclusionDescriptor, String> {
+    state.db.add_custom_exclusion(&path, &reason)
+}
+
+#[tauri::command]
+pub fn remove_custom_exclusion(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<bool, String> {
+    state.db.remove_custom_exclusion(&path)
+}
+
+#[tauri::command]
+pub fn query_cleanup_history(
+    state: State<'_, AppState>,
+    request: HistoryQueryRequest,
+) -> Result<HistoryQueryResponse, String> {
+    state.db.query_cleanup_history(request).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_cleanup_analytics(
+    state: State<'_, AppState>,
+) -> Result<CleanupAnalyticsSummary, String> {
+    state.db.get_cleanup_analytics().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn check_database_integrity(
+    state: State<'_, AppState>,
+) -> Result<DatabaseHealthReport, String> {
+    state.db.check_database_integrity().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn prune_history_by_retention(
+    state: State<'_, AppState>,
+    retention_days: u64,
+) -> Result<usize, String> {
+    state.db.prune_history(retention_days).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn clear_cleanup_history(
+    state: State<'_, AppState>,
+    confirmed: bool,
+) -> Result<(), String> {
+    state.db.clear_cleanup_history(confirmed)
+}
+
+#[tauri::command]
+pub fn clear_scan_history(
+    state: State<'_, AppState>,
+    confirmed: bool,
+) -> Result<(), String> {
+    state.db.clear_scan_history(confirmed)
+}
+
+#[tauri::command]
+pub fn send_test_notification() -> Result<(), String> {
+    NotificationManager::send(
+        "myclean",
+        Some("Preferences Check"),
+        "Notifications are functioning normally. All safety guardrails active.",
+    )
 }
 
 #[tauri::command]

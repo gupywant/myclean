@@ -5,6 +5,7 @@ pub mod db;
 pub mod developer;
 pub mod docker;
 pub mod duplicates;
+pub mod notifications;
 pub mod safety;
 pub mod scanner;
 pub mod storage;
@@ -59,6 +60,18 @@ pub fn run() {
             commands::remove_from_whitelist,
             commands::get_app_setting,
             commands::set_app_setting,
+            commands::get_preferences,
+            commands::update_preferences,
+            commands::get_all_exclusions,
+            commands::add_custom_exclusion,
+            commands::remove_custom_exclusion,
+            commands::query_cleanup_history,
+            commands::get_cleanup_analytics,
+            commands::check_database_integrity,
+            commands::prune_history_by_retention,
+            commands::clear_cleanup_history,
+            commands::clear_scan_history,
+            commands::send_test_notification,
             commands::analyze_storage,
             commands::cancel_storage_analysis,
             commands::open_in_finder,
