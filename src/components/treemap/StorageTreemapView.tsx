@@ -1,13 +1,15 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useFluxStore } from "../../store/useFluxStore";
 import { formatBytes, formatDate, truncatePath } from "../../lib/utils";
 import { SquarifiedTreemap } from "./SquarifiedTreemap";
 import {
   HardDrive,
   Folder,
+  File,
   CaretRight,
   ArrowBendUpLeft,
   ArrowSquareOut,
+  ArrowElbowDownRight,
   Stop,
   Sparkle,
   ChartPieSlice,
@@ -36,15 +38,29 @@ export const StorageTreemapView: React.FC = () => {
   const [targetPreset, setTargetPreset] = useState<string>("home");
   const [filterType, setFilterType] = useState<string>("all");
 
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [dimensions, setDimensions] = useState<{ width: number; height: number }>({
-    width: 600,
-    height: 480,
-  });
+  const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null);
+  const [dimensions, setDimensions] = useState<{ width: number; height: number }>(() => ({
+    width: typeof window !== "undefined" ? Math.max(700, window.innerWidth - 300) : 800,
+    height: 440,
+  }));
 
-  // Track container dimensions using ResizeObserver
+  // Track container dimensions using ResizeObserver with callback ref
   useEffect(() => {
-    if (!containerRef.current) return;
+    if (!containerEl) return;
+
+    const measure = () => {
+      const rect = containerEl.getBoundingClientRect();
+      const w = Math.floor(rect.width);
+      const h = Math.floor(rect.height);
+      if (w > 50 && h > 50) {
+        setDimensions({ width: w, height: h });
+      }
+    };
+
+    // Immediate measurement on DOM attach
+    measure();
+    const rafId = requestAnimationFrame(measure);
+
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
         const { width, height } = entry.contentRect;
@@ -57,9 +73,15 @@ export const StorageTreemapView: React.FC = () => {
       }
     });
 
-    observer.observe(containerRef.current);
-    return () => observer.disconnect();
-  }, []);
+    observer.observe(containerEl);
+    window.addEventListener("resize", measure);
+
+    return () => {
+      cancelAnimationFrame(rafId);
+      observer.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [containerEl]);
 
   // Initial auto-analyze if empty
   useEffect(() => {
@@ -90,6 +112,13 @@ export const StorageTreemapView: React.FC = () => {
   const volume = storageResult?.volume;
   const coverage = storageResult?.coverage;
   const displayNode = activeDrillDownNode || storageResult?.root_node;
+
+  const childrenItems = useMemo(() => {
+    if (!displayNode || !displayNode.children) return [];
+    return [...displayNode.children].sort(
+      (a, b) => b.allocated_bytes - a.allocated_bytes
+    );
+  }, [displayNode]);
 
   // Filtered largest files
   const filteredFiles = (storageResult?.largest_files || []).filter((f) => {
@@ -328,58 +357,212 @@ export const StorageTreemapView: React.FC = () => {
           </div>
         )}
 
-        {/* Tab 1: Interactive Squarified Treemap */}
+        {/* Tab 1: Interactive Squarified Treemap & Folder Contents */}
         {!isStorageAnalyzing && activeTab === "treemap" && (
-          <div className="flex-1 flex flex-col min-h-0 space-y-3">
-            {/* Treemap Container with dynamic sizing */}
-            <div ref={containerRef} className="flex-1 min-h-[350px] w-full relative">
-              {displayNode && (
-                <SquarifiedTreemap
-                  rootNode={displayNode}
-                  width={dimensions.width}
-                  height={dimensions.height}
-                  onSelectNode={(node) => {
-                    if (node.node_type === "directory") {
-                      drillDownNode(node);
-                    }
-                  }}
-                />
-              )}
-            </div>
-
-            {/* Treemap Legend & Actions */}
-            <div className="flex flex-wrap items-center justify-between gap-3 pt-2 text-xs text-slate-400 shrink-0">
-              <div className="flex items-center space-x-4">
-                <div className="flex items-center space-x-1.5">
-                  <div className="w-3 h-3 rounded bg-emerald-500/30 border border-emerald-500/50" />
-                  <span>Safe to Clean</span>
-                </div>
-                <div className="flex items-center space-x-1.5">
-                  <div className="w-3 h-3 rounded bg-indigo-500/30 border border-indigo-500/50" />
-                  <span>Directories</span>
-                </div>
-                <div className="flex items-center space-x-1.5">
-                  <div className="w-3 h-3 rounded bg-violet-500/30 border border-violet-500/50" />
-                  <span>Developer / Code</span>
-                </div>
-                <div className="flex items-center space-x-1.5">
-                  <div className="w-3 h-3 rounded bg-amber-500/30 border border-amber-500/50" />
-                  <span>Archives & Disk Images</span>
-                </div>
-                <div className="flex items-center space-x-1.5">
-                  <div className="w-3 h-3 rounded bg-rose-500/30 border border-rose-500/50" />
-                  <span>Protected</span>
-                </div>
+          <div className="flex-1 overflow-y-auto min-h-0 space-y-5 pr-1">
+            {/* Treemap Card Container */}
+            <div className="rounded-xl bg-[#090C16] border border-white/[0.06] p-3 space-y-3 shrink-0">
+              <div
+                ref={setContainerEl}
+                className="w-full h-[400px] xl:h-[460px] relative shrink-0"
+              >
+                {displayNode && (
+                  <SquarifiedTreemap
+                    rootNode={displayNode}
+                    width={dimensions.width}
+                    height={dimensions.height}
+                    onSelectNode={(node) => {
+                      if (node.node_type === "directory") {
+                        drillDownNode(node);
+                      }
+                    }}
+                  />
+                )}
               </div>
 
-              {displayNode && (
-                <button
-                  onClick={() => openInFinder(displayNode.path)}
-                  className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] text-slate-200 border border-white/[0.08] transition-colors"
-                >
-                  <ArrowSquareOut size={14} />
-                  <span>Reveal Folder in Finder</span>
-                </button>
+              {/* Treemap Legend & Actions */}
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-1 text-xs text-slate-400 shrink-0">
+                <div className="flex items-center space-x-4">
+                  <div className="flex items-center space-x-1.5">
+                    <div className="w-3 h-3 rounded bg-emerald-500/30 border border-emerald-500/50" />
+                    <span>Safe to Clean</span>
+                  </div>
+                  <div className="flex items-center space-x-1.5">
+                    <div className="w-3 h-3 rounded bg-indigo-500/30 border border-indigo-500/50" />
+                    <span>Directories</span>
+                  </div>
+                  <div className="flex items-center space-x-1.5">
+                    <div className="w-3 h-3 rounded bg-violet-500/30 border border-violet-500/50" />
+                    <span>Developer / Code</span>
+                  </div>
+                  <div className="flex items-center space-x-1.5">
+                    <div className="w-3 h-3 rounded bg-amber-500/30 border border-amber-500/50" />
+                    <span>Archives & Disk Images</span>
+                  </div>
+                  <div className="flex items-center space-x-1.5">
+                    <div className="w-3 h-3 rounded bg-rose-500/30 border border-rose-500/50" />
+                    <span>Protected</span>
+                  </div>
+                </div>
+
+                {displayNode && (
+                  <button
+                    onClick={() => openInFinder(displayNode.path)}
+                    className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] text-slate-200 border border-white/[0.08] transition-colors"
+                  >
+                    <ArrowSquareOut size={14} />
+                    <span>Reveal Current Folder in Finder</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Folder Contents Breakdown Table */}
+            <div className="rounded-xl bg-[#0D101C] border border-white/[0.06] overflow-hidden">
+              <div className="px-5 py-3.5 border-b border-white/[0.06] flex items-center justify-between bg-white/[0.02]">
+                <div className="flex items-center space-x-2.5">
+                  <Folder size={16} weight="fill" className="text-cyan-400" />
+                  <span className="text-xs font-semibold text-white tracking-wide uppercase">
+                    Folder Contents Breakdown
+                  </span>
+                  {displayNode && (
+                    <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-white/[0.04] text-slate-300 border border-white/[0.06]">
+                      {childrenItems.length} items
+                    </span>
+                  )}
+                </div>
+                {displayNode && (
+                  <span className="text-xs font-mono text-cyan-300 font-bold">
+                    Total: {formatBytes(displayNode.allocated_bytes)}
+                  </span>
+                )}
+              </div>
+
+              {childrenItems.length === 0 ? (
+                <div className="p-10 text-center text-xs text-slate-500 font-mono">
+                  No sub-folders or files found in this directory.
+                </div>
+              ) : (
+                <div className="divide-y divide-white/[0.04]">
+                  {childrenItems.map((item) => {
+                    const isDir = item.node_type === "directory";
+                    const parentBytes = displayNode?.allocated_bytes || 1;
+                    const pct = Math.min(100, Math.max(0, (item.allocated_bytes / parentBytes) * 100));
+
+                    return (
+                      <div
+                        key={item.id || item.path}
+                        className="px-5 py-3 flex items-center justify-between hover:bg-white/[0.02] transition-colors group"
+                      >
+                        <div className="flex items-center space-x-3 min-w-0 pr-4 flex-1">
+                          <div className="w-8 h-8 rounded-lg bg-white/[0.03] border border-white/[0.06] flex items-center justify-center shrink-0">
+                            {isDir ? (
+                              <Folder size={16} weight="fill" className="text-indigo-400" />
+                            ) : item.file_type === "developer" ? (
+                              <FileCode size={16} className="text-violet-400" />
+                            ) : item.file_type === "archives" ? (
+                              <FileArchive size={16} className="text-amber-400" />
+                            ) : item.file_type === "media" ? (
+                              <FileVideo size={16} className="text-cyan-400" />
+                            ) : item.file_type === "documents" ? (
+                              <FileText size={16} className="text-sky-400" />
+                            ) : (
+                              <File size={16} className="text-slate-400" />
+                            )}
+                          </div>
+
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center space-x-2">
+                              {isDir ? (
+                                <button
+                                  onClick={() => drillDownNode(item)}
+                                  className="text-xs font-semibold text-white hover:text-cyan-300 truncate transition-colors text-left"
+                                >
+                                  {item.name}
+                                </button>
+                              ) : (
+                                <span className="text-xs font-semibold text-white truncate">
+                                  {item.name}
+                                </span>
+                              )}
+
+                              <span
+                                className={`text-[10px] px-1.5 py-0.2 rounded font-medium shrink-0 ${
+                                  item.classification === "safe_to_clean"
+                                    ? "bg-emerald-500/10 text-emerald-300 border border-emerald-500/20"
+                                    : item.classification === "protected"
+                                    ? "bg-rose-500/10 text-rose-300 border border-rose-500/20"
+                                    : "bg-white/[0.04] text-slate-400 border border-white/[0.06]"
+                                }`}
+                              >
+                                {item.classification === "safe_to_clean"
+                                  ? "Safe"
+                                  : item.classification === "protected"
+                                  ? "Protected"
+                                  : isDir
+                                  ? "Folder"
+                                  : "File"}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center space-x-3 text-[11px] text-slate-500 font-mono mt-0.5 truncate">
+                              <span>{truncatePath(item.path, 50)}</span>
+                              {isDir && item.file_count > 0 && (
+                                <span>• {item.file_count.toLocaleString()} files</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Progress Bar & Percentage */}
+                        <div className="hidden md:flex items-center space-x-3 w-44 shrink-0 px-3">
+                          <div className="flex-1 h-1.5 bg-white/[0.06] rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-gradient-to-r from-indigo-500 to-cyan-400 rounded-full"
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                          <span className="text-[11px] font-mono text-slate-400 w-11 text-right">
+                            {pct.toFixed(1)}%
+                          </span>
+                        </div>
+
+                        {/* Sizes & Actions */}
+                        <div className="flex items-center space-x-3 shrink-0">
+                          <span className="text-xs font-mono font-bold text-cyan-300 w-20 text-right">
+                            {formatBytes(item.allocated_bytes)}
+                          </span>
+
+                          {isDir && (
+                            <button
+                              onClick={() => drillDownNode(item)}
+                              className="p-1.5 rounded-lg bg-white/[0.03] hover:bg-cyan-500/20 text-slate-400 hover:text-cyan-300 border border-white/[0.06] transition-colors"
+                              title="Explore Folder"
+                            >
+                              <ArrowElbowDownRight size={14} />
+                            </button>
+                          )}
+
+                          <button
+                            onClick={() => openInFinder(item.path)}
+                            className="p-1.5 rounded-lg bg-white/[0.03] hover:bg-indigo-600/30 text-slate-400 hover:text-indigo-300 border border-white/[0.06] transition-colors"
+                            title="Reveal in Finder"
+                          >
+                            <ArrowSquareOut size={14} />
+                          </button>
+
+                          <button
+                            onClick={() => handleExcludePath(item.path, item.name)}
+                            className="p-1.5 rounded-lg bg-white/[0.03] hover:bg-amber-500/20 text-slate-400 hover:text-amber-300 border border-white/[0.06] transition-colors"
+                            title="Add to Exclusions Whitelist"
+                          >
+                            <MinusCircle size={15} />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               )}
             </div>
           </div>

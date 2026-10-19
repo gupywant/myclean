@@ -454,10 +454,16 @@
   - One-click shortcut on the Trash row (`api.openTrashFolder()`) reveals the macOS Trash directly in Finder.
   - Added auto-refresh on window focus so external file deletions and Finder actions immediately reflect in the sidebar.
   - Added unit test `test_trash_metrics_gathering` (104/104 cargo tests passing).
+- [x] **Storage Analyzer Layout & Dynamic Treemap ResizeObserver:**
+  - Resolved initial container dimension bug where the Squarified Treemap SVG defaulted to fixed fallback dimensions (600x480) when `isStorageAnalyzing` completed, requiring the user to switch tabs to trigger a remount.
+  - Implemented callback ref `ref={setContainerEl}` with an active `ResizeObserver` and window resize listeners, ensuring immediate and accurate DOM bounding box measurement the exact instant the analysis completes.
+  - Added full vertical scrollability (`overflow-y-auto`) to the Storage Analyzer view so users can inspect complete hierarchical results.
+  - Implemented **Folder Contents Breakdown** table directly beneath the Treemap, providing a comprehensive ranked list of all files and folders in the current directory (sorted by allocated bytes) with visual proportion bars, file counts, risk classification badges, "Drill Down / Explore" buttons, and "Reveal in Finder" shortcuts.
 
 ### Phase 12: Homebrew Tap & Update Checker (Planned / Next)
 - [ ] Create Homebrew Tap (`gupywant/homebrew-tap`) and Cask formula (`Casks/myclean.rb`).
 - [ ] Implement opt-in GitHub Release update notifier with semantic version comparisons.
+
 
 
 
