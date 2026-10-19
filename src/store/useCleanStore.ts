@@ -890,9 +890,13 @@ export const useCleanStore = create<CleanState>((set, get) => ({
 
     let unlisten: (() => void) | undefined;
     try {
-      unlisten = await api.onDuplicateProgress((progress) => {
-        set({ duplicateProgress: progress });
-      });
+      try {
+        unlisten = await api.onDuplicateProgress((progress) => {
+          set({ duplicateProgress: progress });
+        });
+      } catch (listenerErr) {
+        console.warn("Duplicate progress listener warning:", listenerErr);
+      }
 
       const res = await api.scanDuplicates(dir || undefined, minSize);
       set({

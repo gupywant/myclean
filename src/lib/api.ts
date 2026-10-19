@@ -211,21 +211,36 @@ export const api = {
     if (!isTauriEnvironment()) {
       return () => {};
     }
-    return listen<ScanProgress>("scan:progress", (event) => callback(event.payload));
+    try {
+      return await listen<ScanProgress>("scan:progress", (event) => callback(event.payload));
+    } catch (e) {
+      console.warn("Could not register scan:progress listener:", e);
+      return () => {};
+    }
   },
 
   async onScanStart(callback: () => void): Promise<UnlistenFn> {
     if (!isTauriEnvironment()) {
       return () => {};
     }
-    return listen("scan:start", () => callback());
+    try {
+      return await listen("scan:start", () => callback());
+    } catch (e) {
+      console.warn("Could not register scan:start listener:", e);
+      return () => {};
+    }
   },
 
   async onScanComplete(callback: (result: ScanResult) => void): Promise<UnlistenFn> {
     if (!isTauriEnvironment()) {
       return () => {};
     }
-    return listen<ScanResult>("scan:complete", (event) => callback(event.payload));
+    try {
+      return await listen<ScanResult>("scan:complete", (event) => callback(event.payload));
+    } catch (e) {
+      console.warn("Could not register scan:complete listener:", e);
+      return () => {};
+    }
   },
 
   async cleanItems(request: CleanRequest): Promise<CleanResult> {
@@ -263,7 +278,12 @@ export const api = {
     if (!isTauriEnvironment()) {
       return () => {};
     }
-    return listen<DuplicateScanProgress>("duplicate:progress", (event) => callback(event.payload));
+    try {
+      return await listen<DuplicateScanProgress>("duplicate:progress", (event) => callback(event.payload));
+    } catch (e) {
+      console.warn("Could not register duplicate:progress listener:", e);
+      return () => {};
+    }
   },
 
   async scanDuplicates(targetPath?: string, minSizeBytes?: number): Promise<DuplicateScanResult> {
