@@ -271,6 +271,7 @@ interface CleanState {
   closeDeveloperCleanModal: () => void;
 
   inspectDocker: () => Promise<void>;
+  startDockerDesktop: () => Promise<boolean>;
   toggleDockerResourceSelection: (id: string) => void;
   selectAllDockerResources: (select: boolean) => void;
   cleanDockerResources: (dryRun?: boolean) => Promise<DockerCleanResult | null>;
@@ -1454,6 +1455,16 @@ export const useCleanStore = create<CleanState>((set, get) => ({
     } catch (err) {
       console.error("Docker inspection error:", err);
       set({ isDockerInspecting: false });
+    }
+  },
+
+  startDockerDesktop: async () => {
+    try {
+      const ok = await api.startDockerDesktop();
+      return ok;
+    } catch (err) {
+      console.error("Failed to start Docker Desktop:", err);
+      return false;
     }
   },
 

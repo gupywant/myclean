@@ -18,6 +18,7 @@ import {
   Plugs,
   PlugsConnected,
   FileCode,
+  RocketLaunch,
 } from "@phosphor-icons/react";
 
 export const DeveloperSpaceView: React.FC = () => {
@@ -38,6 +39,7 @@ export const DeveloperSpaceView: React.FC = () => {
     setDeveloperActiveTab,
     openDeveloperCleanModal,
     inspectDocker,
+    startDockerDesktop,
     toggleDockerResourceSelection,
     selectAllDockerResources,
     openDockerCleanModal,
@@ -47,6 +49,22 @@ export const DeveloperSpaceView: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [workspaceInput, setWorkspaceInput] = useState("");
   const [dockerFilter, setDockerFilter] = useState<string>("all");
+  const [isStartingDocker, setIsStartingDocker] = useState(false);
+
+  const handleStartDocker = async () => {
+    setIsStartingDocker(true);
+    try {
+      await startDockerDesktop();
+      setTimeout(() => inspectDocker(), 3000);
+      setTimeout(() => inspectDocker(), 6000);
+      setTimeout(() => {
+        inspectDocker();
+        setIsStartingDocker(false);
+      }, 10000);
+    } catch {
+      setIsStartingDocker(false);
+    }
+  };
 
   useEffect(() => {
     if (!developerResult && !isDeveloperScanning) {
@@ -659,14 +677,28 @@ export const DeveloperSpaceView: React.FC = () => {
               </div>
             </div>
 
-            <button
-              onClick={() => inspectDocker()}
-              disabled={isDockerInspecting}
-              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-white/[0.04] text-slate-300 hover:text-white hover:bg-white/[0.08] border border-white/[0.06] transition-colors flex items-center space-x-1.5 cursor-pointer disabled:opacity-50"
-            >
-              <ArrowClockwise size={13} className={isDockerInspecting ? "animate-spin" : ""} />
-              <span>Inspect Daemon</span>
-            </button>
+            <div className="flex items-center space-x-2 shrink-0">
+              {!isDockerConnected && (
+                <button
+                  onClick={handleStartDocker}
+                  disabled={isStartingDocker}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/25 transition-all flex items-center space-x-1.5 cursor-pointer disabled:opacity-50"
+                  title="Launch Docker Desktop"
+                >
+                  <RocketLaunch size={14} weight="fill" />
+                  <span>{isStartingDocker ? "Starting Docker..." : "Start Docker Desktop"}</span>
+                </button>
+              )}
+
+              <button
+                onClick={() => inspectDocker()}
+                disabled={isDockerInspecting}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium bg-white/[0.04] text-slate-300 hover:text-white hover:bg-white/[0.08] border border-white/[0.06] transition-colors flex items-center space-x-1.5 cursor-pointer disabled:opacity-50"
+              >
+                <ArrowClockwise size={13} className={isDockerInspecting ? "animate-spin" : ""} />
+                <span>Inspect Daemon</span>
+              </button>
+            </div>
           </div>
 
           {/* Docker Storage Breakdown Cards */}
@@ -804,13 +836,32 @@ export const DeveloperSpaceView: React.FC = () => {
             </div>
 
             {filteredDockerResources.length === 0 ? (
-              <div className="p-12 text-center space-y-2">
-                <HardDrives size={32} className="text-slate-400 mx-auto" />
-                <p className="text-xs text-slate-400">
-                  {isDockerConnected
-                    ? "No Docker resources found in this category."
-                    : "Docker daemon is offline. Start Docker Desktop and click 'Inspect Daemon'."}
-                </p>
+              <div className="p-12 text-center space-y-3">
+                <HardDrives size={36} className="text-slate-500 mx-auto" />
+                <div className="space-y-1">
+                  <h3 className="text-sm font-semibold text-white">
+                    {isDockerConnected
+                      ? "No Docker resources found in this category."
+                      : "Docker Daemon is Offline"}
+                  </h3>
+                  <p className="text-xs text-slate-400 max-w-md mx-auto">
+                    {isDockerConnected
+                      ? "All containers, images, and build caches are clean."
+                      : "Docker Desktop application is currently closed or the background daemon is not running. Launch Docker Desktop to detect and clean reclaimable containers, build caches, and images."}
+                  </p>
+                </div>
+                {!isDockerConnected && (
+                  <div className="pt-2">
+                    <button
+                      onClick={handleStartDocker}
+                      disabled={isStartingDocker}
+                      className="px-4 py-2 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/25 transition-all inline-flex items-center space-x-2 cursor-pointer disabled:opacity-50"
+                    >
+                      <RocketLaunch size={14} weight="fill" />
+                      <span>{isStartingDocker ? "Starting Docker Desktop..." : "Start Docker Desktop"}</span>
+                    </button>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="divide-y divide-white/[0.04]">

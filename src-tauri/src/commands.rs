@@ -684,6 +684,29 @@ pub async fn inspect_docker() -> Result<DockerScanResult, String> {
 }
 
 #[tauri::command]
+pub async fn start_docker_desktop() -> Result<bool, String> {
+    tokio::task::spawn_blocking(|| {
+        let app_paths = [
+            PathBuf::from("/Applications/Docker.app"),
+            dirs::home_dir().map(|h| h.join("Applications/Docker.app")).unwrap_or_default(),
+        ];
+
+        for app in &app_paths {
+            if app.exists() {
+                std::process::Command::new("open")
+                    .arg(app)
+                    .spawn()
+                    .map_err(|e| format!("Failed to launch Docker Desktop: {}", e))?;
+                return Ok(true);
+            }
+        }
+        Err("Docker Desktop is not installed in /Applications.".into())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 pub async fn clean_docker_resources(
     state: State<'_, AppState>,
     request: DockerCleanRequest,

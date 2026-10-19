@@ -72,6 +72,7 @@ pub fn run() {
             commands::inspect_developer_workspace,
             commands::clean_developer_artifacts,
             commands::inspect_docker,
+            commands::start_docker_desktop,
             commands::clean_docker_resources,
             commands::get_scan_history,
             commands::get_cleanup_history,

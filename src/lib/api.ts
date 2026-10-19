@@ -949,6 +949,11 @@ export const api = {
     return invoke<DockerScanResult>("inspect_docker");
   },
 
+  async startDockerDesktop(): Promise<boolean> {
+    if (!isTauriEnvironment()) return false;
+    return invoke<boolean>("start_docker_desktop");
+  },
+
   async cleanDockerResources(request: DockerCleanRequest): Promise<DockerCleanResult> {
     if (!isTauriEnvironment()) {
       await new Promise((r) => setTimeout(r, 600));
