@@ -4,6 +4,15 @@ dist/
 dist-ssr/
 *.local
 
+# Environment & Secrets
+.env
+.env.*
+*.pem
+*.key
+*.cert
+credentials*
+secrets*
+
 # Rust & Tauri
 target/
 src-tauri/target/
