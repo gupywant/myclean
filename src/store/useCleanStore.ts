@@ -721,10 +721,10 @@ export const useCleanStore = create<CleanState>((set, get) => ({
   setDryRunMode: (val) => set({ dryRunMode: val }),
   setCleanupMethod: (method) => set({ cleanupMethod: method }),
   openConfirmModal: () => {
-    set({ showConfirmModal: true });
+    set({ showConfirmModal: true, lastCleanResult: null });
     get().checkActiveAppsForSelected();
   },
-  closeConfirmModal: () => set({ showConfirmModal: false }),
+  closeConfirmModal: () => set({ showConfirmModal: false, lastCleanResult: null }),
 
   checkActiveAppsForSelected: async () => {
     const { scanResult, selectedItemIds } = get();
@@ -765,7 +765,7 @@ export const useCleanStore = create<CleanState>((set, get) => ({
 
     if (pathsToClean.length === 0) return null;
 
-    set({ isCleaning: true, showConfirmModal: false });
+    set({ isCleaning: true, lastCleanResult: null });
 
     try {
       const result = await api.cleanItems({
