@@ -29,12 +29,36 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["app"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
-      "icons/icon.png"
-    ]
+      "icons/icon.png",
+      "icons/icon.icns"
+    ],
+    "category": "Utility",
+    "copyright": "Copyright © 2026 myclean. All rights reserved.",
+    "shortDescription": "High-performance, privacy-first macOS cleaner and optimization studio",
+    "longDescription": "myclean is a high-performance, privacy-first macOS cleaner and optimization studio with a Futuristic Premium interface.",
+    "macOS": {
+      "frameworks": [],
+      "minimumSystemVersion": "11.0",
+      "signingIdentity": null,
+      "dmg": {
+        "windowSize": {
+          "width": 600,
+          "height": 380
+        },
+        "appPosition": {
+          "x": 160,
+          "y": 180
+        },
+        "applicationFolderPosition": {
+          "x": 440,
+          "y": 180
+        }
+      }
+    }
   }
 }

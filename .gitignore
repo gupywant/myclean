@@ -23,3 +23,7 @@ Icon
 *.log
 .vscode/
 .idea/
+
+# Distribution & Releases
+release-artifacts/
+*.dmg

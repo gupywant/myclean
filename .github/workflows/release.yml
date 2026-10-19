@@ -1,0 +1,88 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build & Package Universal macOS Release
+    runs-on: macos-14
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+          components: clippy
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Verify TypeScript types
+        run: npx tsc --noEmit
+
+      - name: Run Rust Clippy
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
+
+      - name: Run Rust test suite
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Build and Package Release Artifacts
+        run: bash scripts/package-release.sh
+
+      - name: Validate Release Artifacts
+        run: |
+          ls -la release-artifacts/
+          cat release-artifacts/SHA256SUMS.txt
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        with:
+          files: release-artifacts/*
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+          name: "myclean ${{ github.ref_name || 'v1.0.0' }}"
+          body: |
+            ### 🚀 myclean ${{ github.ref_name || 'v1.0.0' }} — Universal macOS Release
+
+            **myclean** is a high-performance, privacy-first macOS cleaner and optimization studio with a Futuristic Premium interface.
+
+            #### 📦 Downloads
+            | File | Architecture | Description |
+            | :--- | :--- | :--- |
+            | `myclean-1.0.0-universal.dmg` | **Universal (arm64 + x86_64)** | **Recommended.** Runs natively on all Apple Silicon & Intel Macs |
+            | `myclean-1.0.0-aarch64.dmg` | Apple Silicon | Optimized thin binary for Apple Silicon (M1/M2/M3/M4) |
+            | `myclean-1.0.0-x86_64.dmg` | Intel 64-bit | Optimized thin binary for Intel Macs |
+            | `SHA256SUMS.txt` | All | Cryptographic SHA-256 verification checksums |
+
+            #### 🛡️ macOS Gatekeeper Note (Unsigned / Ad-Hoc Build)
+            Because this release is distributed independently without a paid Apple Developer subscription:
+            1. Open the downloaded `.dmg` and drag `myclean.app` into `/Applications`.
+            2. When opening for the first time, if macOS displays *"myclean cannot be opened because Apple cannot check it for malicious software"*:
+               - Open **System Settings > Privacy & Security**.
+               - Scroll down to the **Security** section.
+               - Click **Open Anyway** next to the notification for `myclean`.
+               - Enter your macOS password to grant one-time execution permission.
+               - *Alternatively:* Right-click (or Control-click) `myclean.app` in `/Applications` and select **Open**, then click **Open** in the dialog.
+            3. **Never** disable Gatekeeper globally via `spctl --master-disable`. myclean does not require disabling system security.
+
+            #### 🔒 Privacy & Safety Guarantee
+            - Zero analytics, zero telemetries, zero external network requests.
+            - All cleanup operations move files to the macOS Trash (`trash::delete`).
+            - Protected paths (System, user documents, active git repositories) are strictly guarded in Rust.

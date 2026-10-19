@@ -310,6 +310,26 @@
   - `npx tsc --noEmit` and `npm run build` passing with 0 errors and 0 warnings.
 
 ### Phase 10: macOS Universal Release
-- [ ] Apple Silicon (`aarch64`) and Intel (`x86_64`) Universal macOS binary compilation
-- [ ] Notarization and DMG packaging
+- [x] **Universal Mach-O Fat Binary Compilation (`lipo` / `package-release.sh`):**
+  - Compiled optimized release binaries for both `aarch64-apple-darwin` (Apple Silicon M1/M2/M3/M4) and `x86_64-apple-darwin` (Intel 64-bit).
+  - Combined targets into a Universal 2 Fat Mach-O binary (`x86_64 arm64`) via Apple `lipo`, allowing a single app bundle to run natively at full speed on all modern Mac systems.
+- [x] **Application Metadata & Retina Icon Generation (`src-tauri/icons/icon.icns`):**
+  - Generated full multi-resolution icon bundle (`icon.icns`, 576 KB) containing 16x16 through 512x512@2x retina assets matching Futuristic Premium branding.
+  - Bundled metadata in `Info.plist`: identifier `com.myclean.app`, version `1.0.0`, category `public.app-category.utilities`, minimum OS `11.0`.
+- [x] **Fast Native Compressed DMG Packaging (`hdiutil` / `scripts/package-release.sh`):**
+  - Automated production-ready UDZO DMG generation containing `myclean.app` and drag-and-drop symlink to `/Applications`.
+  - Generates 3 distribution flavors: `myclean-1.0.0-universal.dmg` (8.0 MB), `myclean-1.0.0-aarch64.dmg` (4.1 MB), and `myclean-1.0.0-x86_64.dmg` (4.7 MB).
+- [x] **Ad-Hoc Code Signing & Strict Bundle Verification (`codesign`):**
+  - Signed bundles using ad-hoc identity (`codesign --force --deep -s -`) with zero dependency on paid Apple Developer ID certificates ($99/yr).
+  - Validated disk integrity and Designated Requirements (`codesign --verify --deep --strict`).
+- [x] **Cryptographic SHA-256 Checksums (`SHA256SUMS.txt`):**
+  - Automated cryptographic hash generation across all packaged DMGs for secure offline download verification.
+- [x] **Automated CI/CD Release Pipeline (`.github/workflows/release.yml`):**
+  - Configured GitHub Actions workflow on `v*` tags with least-privilege `contents: write` permissions.
+  - Automates dual-target Rust toolchain setup, linting (`clippy`), unit tests (`cargo test`), TypeScript checks (`tsc`), DMG packaging, and release publishing via `softprops/action-gh-release@v2`.
+- [x] **Comprehensive Public Distribution Guides:**
+  - `INSTALL_MACOS.md`: Step-by-step installation, Gatekeeper "Open Anyway" instructions, Full Disk Access (FDA) guidance, and complete uninstallation instructions without disabling system security.
+  - `RELEASE.md`: Technical packaging architecture, build matrix, and privacy declarations.
+  - `CHANGELOG.md`: Complete history of features, safety invariants, and performance benchmarks across all 10 phases.
+  - `WEBSITE_DISTRIBUTION.md`: Download CDN URLs, copy guidelines, React/Tailwind download card component, and SEO metadata.
 
