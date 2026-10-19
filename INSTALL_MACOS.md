@@ -26,7 +26,7 @@ This guide provides instructions for installing, launching, and managing **mycle
 
 ## 2. Standard Installation
 
-1. Download the `.dmg` of your choice from the [Releases](https://github.com/your-org/myclean/releases) page.
+1. Download the `.dmg` of your choice from the [Releases](https://github.com/gupywant/myclean/releases) page.
 2. Double-click the downloaded `.dmg` file in Finder to mount it.
 3. In the mounted disk image window, drag **myclean.app** into the **Applications** folder shortcut.
 4. Eject the disk image in Finder by clicking the Eject icon next to **myclean** in the sidebar.

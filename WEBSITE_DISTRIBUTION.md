@@ -11,10 +11,10 @@ When publishing releases to GitHub, asset links follow a standard CDN pattern. U
 ### Latest Version Links
 | Platform / Target | Download URL | Recommended Button Copy |
 | :--- | :--- | :--- |
-| **Universal macOS** *(Recommended)* | `https://github.com/myclean-app/myclean/releases/latest/download/myclean-1.0.0-universal.dmg` | **Download for macOS (Universal)**<br><small>Apple Silicon & Intel • macOS 11+</small> |
-| **Apple Silicon (M1/M2/M3/M4)** | `https://github.com/myclean-app/myclean/releases/latest/download/myclean-1.0.0-aarch64.dmg` | **Apple Silicon (arm64)** |
-| **Intel Mac (64-bit)** | `https://github.com/myclean-app/myclean/releases/latest/download/myclean-1.0.0-x86_64.dmg` | **Intel Mac (x86_64)** |
-| **Integrity Checksums** | `https://github.com/myclean-app/myclean/releases/latest/download/SHA256SUMS.txt` | View SHA-256 Checksums |
+| **Universal macOS** *(Recommended)* | `https://github.com/gupywant/myclean/releases/latest/download/myclean-1.0.0-universal.dmg` | **Download for macOS (Universal)**<br><small>Apple Silicon & Intel • macOS 11+</small> |
+| **Apple Silicon (M1/M2/M3/M4)** | `https://github.com/gupywant/myclean/releases/latest/download/myclean-1.0.0-aarch64.dmg` | **Apple Silicon (arm64)** |
+| **Intel Mac (64-bit)** | `https://github.com/gupywant/myclean/releases/latest/download/myclean-1.0.0-x86_64.dmg` | **Intel Mac (x86_64)** |
+| **Integrity Checksums** | `https://github.com/gupywant/myclean/releases/latest/download/SHA256SUMS.txt` | View SHA-256 Checksums |
 
 ---
 
@@ -47,7 +47,7 @@ export function DownloadSection() {
       {/* Main Download CTA */}
       <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-6">
         <a
-          href="https://github.com/myclean-app/myclean/releases/latest/download/myclean-1.0.0-universal.dmg"
+          href="https://github.com/gupywant/myclean/releases/latest/download/myclean-1.0.0-universal.dmg"
           className="w-full sm:w-auto px-8 py-4 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-semibold text-lg shadow-lg shadow-violet-500/25 transition-all flex items-center justify-center gap-3"
         >
           <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
@@ -61,21 +61,21 @@ export function DownloadSection() {
       <div className="flex items-center justify-center gap-6 text-sm text-slate-400 mb-8">
         <span>Also available for:</span>
         <a
-          href="https://github.com/myclean-app/myclean/releases/latest/download/myclean-1.0.0-aarch64.dmg"
+          href="https://github.com/gupywant/myclean/releases/latest/download/myclean-1.0.0-aarch64.dmg"
           className="text-violet-400 hover:underline"
         >
           Apple Silicon Only (.dmg)
         </a>
         <span className="text-slate-600">•</span>
         <a
-          href="https://github.com/myclean-app/myclean/releases/latest/download/myclean-1.0.0-x86_64.dmg"
+          href="https://github.com/gupywant/myclean/releases/latest/download/myclean-1.0.0-x86_64.dmg"
           className="text-violet-400 hover:underline"
         >
           Intel Only (.dmg)
         </a>
         <span className="text-slate-600">•</span>
         <a
-          href="https://github.com/myclean-app/myclean/releases/latest/download/SHA256SUMS.txt"
+          href="https://github.com/gupywant/myclean/releases/latest/download/SHA256SUMS.txt"
           className="text-slate-400 hover:text-white"
         >
           SHA-256 Hashes
