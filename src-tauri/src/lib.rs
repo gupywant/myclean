@@ -5,6 +5,7 @@ pub mod db;
 pub mod developer;
 pub mod docker;
 pub mod duplicates;
+pub mod large_files;
 pub mod notifications;
 pub mod safety;
 pub mod scanner;
@@ -28,6 +29,7 @@ pub fn run() {
         duplicate_clean_cancel_token: Arc::new(AtomicBool::new(false)),
         storage_cancel_token: Arc::new(AtomicBool::new(false)),
         developer_cancel_token: Arc::new(AtomicBool::new(false)),
+        large_files_cancel_token: Arc::new(AtomicBool::new(false)),
     };
 
     tauri::Builder::default()
@@ -91,6 +93,8 @@ pub fn run() {
             commands::send_test_notification,
             commands::analyze_storage,
             commands::cancel_storage_analysis,
+            commands::scan_large_old_files,
+            commands::cancel_large_old_files_scan,
             commands::open_in_finder,
         ])
         .run(tauri::generate_context!())

@@ -33,6 +33,7 @@ import type {
   HistoryQueryResponse,
   CleanupAnalyticsSummary,
   DatabaseHealthReport,
+  LargeFilesScanResult,
 } from "../types";
 
 export const isTauriEnvironment = (): boolean => {
@@ -645,6 +646,48 @@ export const api = {
   async cancelStorageAnalysis(): Promise<boolean> {
     if (!isTauriEnvironment()) return true;
     return invoke<boolean>("cancel_storage_analysis");
+  },
+
+  async scanLargeOldFiles(
+    targetPath?: string,
+    minSizeMB?: number,
+    minDaysOld?: number
+  ): Promise<LargeFilesScanResult> {
+    if (!isTauriEnvironment()) {
+      await new Promise((r) => setTimeout(r, 400));
+      return {
+        target_path: targetPath || "/Users/user/Downloads",
+        min_size_bytes: (minSizeMB || 25) * 1024 * 1024,
+        min_days_old: minDaysOld || 0,
+        total_bytes: 49000000,
+        total_files: 1,
+        duration_ms: 120,
+        items: [
+          {
+            id: "/Users/user/Downloads/Gaionix Phising.mp4",
+            path: "/Users/user/Downloads/Gaionix Phising.mp4",
+            name: "Gaionix Phising.mp4",
+            size_bytes: 49000000,
+            allocated_bytes: 49152000,
+            modified_at: new Date().toISOString(),
+            days_old: 1,
+            extension: "mp4",
+            category: "media",
+          },
+        ],
+        was_cancelled: false,
+      };
+    }
+    return invoke<LargeFilesScanResult>("scan_large_old_files", {
+      targetPath,
+      minSizeMb: minSizeMB,
+      minDaysOld,
+    });
+  },
+
+  async cancelLargeOldFilesScan(): Promise<boolean> {
+    if (!isTauriEnvironment()) return true;
+    return invoke<boolean>("cancel_large_old_files_scan");
   },
 
   async scanDeveloperSpaces(workspaces?: string[]): Promise<DeveloperScanResult> {

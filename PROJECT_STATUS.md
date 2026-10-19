@@ -465,10 +465,36 @@
     - Added live loading spinners (`CircleNotch`) on active scanning tabs, providing instant visual feedback.
     - Replaced hardcoded frontend paths with dynamic backend preset resolution (`"home"`, `"caches"`, `"developer"`, `"downloads"` via `dirs::home_dir()`).
     - Enhanced Largest Files tab filter buttons with count badges `({count})` and per-category top item retention in `StorageAnalyzer::analyze`, preventing Developer and Caches filters from being starved by media/archives.
+- [x] **Large & Old Files Dedicated Engine & Interactive Studio:**
+  - Diagnosed why Large & Old Files was previously empty:
+    1. It had no standalone scanner command or auto-scan on mount — it passively waited for the Dashboard Smart Scan.
+    2. Smart Scan only inspected `Downloads` to depth 2 with a hardcoded minimum threshold of `>= 100 MB`.
+    3. User downloads frequently contain 20MB–50MB files (e.g., installer `.dmg`s, `.mp4` video captures) which were excluded.
+    4. UI filters lacked lower thresholds (25 MB, 50 MB), age filters, scope selection, and search.
+  - Implemented dedicated Rust systems engine `LargeFilesScanner` (`src-tauri/src/large_files.rs`):
+    - Multi-threaded traversal with Rayon & cancellation check (`AtomicBool`).
+    - Dynamic scope keyword resolution (`"downloads"`, `"home"`, `"desktop"`, `"documents"`, `"movies"`).
+    - Configurable minimum size threshold (defaulting to 25 MB).
+    - Age computation in days (`days_old`) from file metadata modification times.
+    - Automatic file category classification (`archive`, `disk_image`, `package`, `media`, `document`, `database`, `other`).
+    - SIP directories, Keychains, and Git repository protection.
+  - Exposed typed Tauri commands `scan_large_old_files` and `cancel_large_old_files_scan`.
+  - Added unit tests `test_large_files_scan_on_temp_dir` and `test_classify_extension` (106/106 tests passing).
+  - Overhauled `LargeFilesView.tsx` with Futuristic Premium design:
+    - Auto-scan on mount (defaulting to Downloads with `> 25 MB`).
+    - Scope selector pills: Downloads, Home (~), Desktop, Documents, Movies.
+    - Size threshold pills: `> 25 MB`, `> 50 MB`, `> 100 MB`, `> 500 MB`, `> 1 GB`, `> 5 GB`.
+    - Age filter pills: `All Ages`, `> 30 Days`, `> 90 Days`, `> 180 Days`, `> 1 Year`.
+    - Category filter pills: `All Types`, `Archives & DMGs`, `Media & Video`, `Documents`, `Other`.
+    - Real-time search query filtering and multi-criteria sorting (Largest First, Smallest First, Oldest First, Newest First, Name A-Z).
+    - Multi-select checkboxes with sticky floating batch action bar and native macOS Trash confirmation dialog.
+    - Per-file actions: Reveal in Finder, Exclude from Future Scans (Whitelist), and Move to Trash.
+    - All deletions routed through silent Cocoa trashing (`NSFileManager.trashItemAtURL`).
 
 ### Phase 12: Homebrew Tap & Update Checker (Planned / Next)
 - [ ] Create Homebrew Tap (`gupywant/homebrew-tap`) and Cask formula (`Casks/myclean.rb`).
 - [ ] Implement opt-in GitHub Release update notifier with semantic version comparisons.
+
 
 
 

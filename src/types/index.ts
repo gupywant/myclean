@@ -251,6 +251,29 @@ export interface StorageAnalysisResult {
   was_cancelled: boolean;
 }
 
+export interface LargeFileItem {
+  id: string;
+  path: string;
+  name: string;
+  size_bytes: number;
+  allocated_bytes: number;
+  modified_at: string | null;
+  days_old: number;
+  extension: string;
+  category: "archive" | "disk_image" | "package" | "media" | "document" | "database" | "other";
+}
+
+export interface LargeFilesScanResult {
+  target_path: string;
+  min_size_bytes: number;
+  min_days_old: number;
+  total_bytes: number;
+  total_files: number;
+  duration_ms: number;
+  items: LargeFileItem[];
+  was_cancelled: boolean;
+}
+
 export interface DuplicateFile {
   path: string;
   name: string;

@@ -13,6 +13,7 @@ use crate::docker::{DockerCleanRequest, DockerCleanResult, DockerManager, Docker
 use crate::duplicates::{
     CleanDuplicatesRequest, DuplicateScanProgress, DuplicateScanResult, DuplicateScanner,
 };
+use crate::large_files::{LargeFilesScanResult, LargeFilesScanner};
 use crate::notifications::NotificationManager;
 use crate::safety::SafetyGuard;
 use crate::scanner::{ScanProgress, ScanResult, ScanScopeConfig, Scanner};
@@ -31,6 +32,7 @@ pub struct AppState {
     pub duplicate_clean_cancel_token: Arc<AtomicBool>,
     pub storage_cancel_token: Arc<AtomicBool>,
     pub developer_cancel_token: Arc<AtomicBool>,
+    pub large_files_cancel_token: Arc<AtomicBool>,
 }
 
 #[tauri::command]
@@ -610,3 +612,64 @@ pub async fn clean_docker_resources(
         .await
         .map_err(|e| e.to_string())?
 }
+
+#[tauri::command]
+pub async fn scan_large_old_files(
+    state: State<'_, AppState>,
+    target_path: Option<String>,
+    min_size_mb: Option<u64>,
+    min_days_old: Option<u64>,
+) -> Result<LargeFilesScanResult, String> {
+    state.large_files_cancel_token.store(false, Ordering::Relaxed);
+    let cancel = state.large_files_cancel_token.clone();
+
+    let path = if let Some(p_str) = target_path {
+        let trimmed = p_str.trim();
+        match trimmed {
+            "home" | "~" => dirs::home_dir().unwrap_or_else(|| PathBuf::from("/")),
+            "downloads" => dirs::download_dir().unwrap_or_else(|| {
+                dirs::home_dir()
+                    .map(|h| h.join("Downloads"))
+                    .unwrap_or_else(|| PathBuf::from("/"))
+            }),
+            "desktop" => dirs::desktop_dir().unwrap_or_else(|| {
+                dirs::home_dir()
+                    .map(|h| h.join("Desktop"))
+                    .unwrap_or_else(|| PathBuf::from("/"))
+            }),
+            "documents" => dirs::document_dir().unwrap_or_else(|| {
+                dirs::home_dir()
+                    .map(|h| h.join("Documents"))
+                    .unwrap_or_else(|| PathBuf::from("/"))
+            }),
+            "movies" => dirs::video_dir().unwrap_or_else(|| {
+                dirs::home_dir()
+                    .map(|h| h.join("Movies"))
+                    .unwrap_or_else(|| PathBuf::from("/"))
+            }),
+            other => PathBuf::from(other),
+        }
+    } else {
+        dirs::download_dir().unwrap_or_else(|| {
+            dirs::home_dir()
+                .map(|h| h.join("Downloads"))
+                .unwrap_or_else(|| PathBuf::from("/"))
+        })
+    };
+
+    let min_bytes = min_size_mb.unwrap_or(25) * 1024 * 1024;
+    let min_days = min_days_old.unwrap_or(0);
+
+    tokio::task::spawn_blocking(move || {
+        LargeFilesScanner::scan(path, min_bytes, min_days, cancel)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn cancel_large_old_files_scan(state: State<'_, AppState>) -> Result<bool, String> {
+    state.large_files_cancel_token.store(true, Ordering::Relaxed);
+    Ok(true)
+}
+

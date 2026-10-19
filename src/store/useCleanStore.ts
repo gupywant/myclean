@@ -31,6 +31,7 @@ import type {
   HistoryQueryResponse,
   CleanupAnalyticsSummary,
   DatabaseHealthReport,
+  LargeFilesScanResult,
 } from "../types";
 
 export const INITIAL_CATEGORY_STATES: Record<string, LiveCategoryState> = {
@@ -196,6 +197,16 @@ interface CleanState {
   databaseHealth: DatabaseHealthReport | null;
   isHealthChecking: boolean;
 
+  // Large & Old Files Studio State
+  largeFilesResult: LargeFilesScanResult | null;
+  isLargeFilesScanning: boolean;
+  largeFilesSelectedIds: Set<string>;
+  largeFilesScope: string;
+  largeFilesMinSizeMB: number;
+  largeFilesMinDays: number;
+  largeFilesCategoryFilter: string;
+  largeFilesSearchQuery: string;
+
   // Actions
   setActiveTab: (tab: NavigationTab) => void;
   fetchSystemSummary: () => Promise<void>;
@@ -283,6 +294,18 @@ interface CleanState {
   clearCleanupHistory: (confirmed: boolean) => Promise<void>;
   clearScanHistory: (confirmed: boolean) => Promise<void>;
   sendTestNotification: () => Promise<void>;
+
+  // Large & Old Files Actions
+  setLargeFilesScope: (scope: string) => void;
+  setLargeFilesMinSizeMB: (mb: number) => void;
+  setLargeFilesMinDays: (days: number) => void;
+  setLargeFilesCategoryFilter: (category: string) => void;
+  setLargeFilesSearchQuery: (query: string) => void;
+  scanLargeFiles: (scope?: string, minSizeMB?: number, minDays?: number) => Promise<void>;
+  cancelLargeFilesScan: () => Promise<void>;
+  toggleLargeFileSelection: (id: string) => void;
+  selectAllLargeFiles: (select: boolean) => void;
+  cleanSelectedLargeFiles: () => Promise<CleanResult | null>;
 }
 
 let activeScanUnlisten: (() => void) | null = null;
@@ -396,6 +419,16 @@ export const useCleanStore = create<CleanState>((set, get) => ({
   isAnalyticsLoading: false,
   databaseHealth: null,
   isHealthChecking: false,
+
+  // Large & Old Files Initial State
+  largeFilesResult: null,
+  isLargeFilesScanning: false,
+  largeFilesSelectedIds: new Set<string>(),
+  largeFilesScope: "downloads",
+  largeFilesMinSizeMB: 25,
+  largeFilesMinDays: 0,
+  largeFilesCategoryFilter: "all",
+  largeFilesSearchQuery: "",
 
   setActiveTab: (tab) => set({ activeTab: tab }),
 
@@ -1628,6 +1661,100 @@ export const useCleanStore = create<CleanState>((set, get) => ({
     } catch (err) {
       console.error("Failed to send test notification:", err);
     }
+  },
+
+  // Large & Old Files Actions
+  setLargeFilesScope: (scope: string) => {
+    set({ largeFilesScope: scope });
+    get().scanLargeFiles(scope);
+  },
+
+  setLargeFilesMinSizeMB: (mb: number) => {
+    set({ largeFilesMinSizeMB: mb });
+    get().scanLargeFiles(undefined, mb);
+  },
+
+  setLargeFilesMinDays: (days: number) => {
+    set({ largeFilesMinDays: days });
+    get().scanLargeFiles(undefined, undefined, days);
+  },
+
+  setLargeFilesCategoryFilter: (category: string) => {
+    set({ largeFilesCategoryFilter: category });
+  },
+
+  setLargeFilesSearchQuery: (query: string) => {
+    set({ largeFilesSearchQuery: query });
+  },
+
+  scanLargeFiles: async (scope, minSizeMB, minDays) => {
+    const targetScope = scope ?? get().largeFilesScope;
+    const targetMinSize = minSizeMB ?? get().largeFilesMinSizeMB;
+    const targetMinDays = minDays ?? get().largeFilesMinDays;
+
+    set({ isLargeFilesScanning: true });
+    try {
+      const result = await api.scanLargeOldFiles(targetScope, targetMinSize, targetMinDays);
+      set({
+        largeFilesResult: result,
+        isLargeFilesScanning: false,
+        largeFilesSelectedIds: new Set<string>(),
+      });
+    } catch (err) {
+      console.error("Large files scan error:", err);
+      set({ isLargeFilesScanning: false });
+    }
+  },
+
+  cancelLargeFilesScan: async () => {
+    try {
+      await api.cancelLargeOldFilesScan();
+    } catch (err) {
+      console.error("Cancel large files scan error:", err);
+    }
+    set({ isLargeFilesScanning: false });
+  },
+
+  toggleLargeFileSelection: (id: string) => {
+    set((state) => {
+      const next = new Set(state.largeFilesSelectedIds);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return { largeFilesSelectedIds: next };
+    });
+  },
+
+  selectAllLargeFiles: (select: boolean) => {
+    set((state) => {
+      if (!select || !state.largeFilesResult) {
+        return { largeFilesSelectedIds: new Set() };
+      }
+      const allIds = new Set(state.largeFilesResult.items.map((i) => i.id));
+      return { largeFilesSelectedIds: allIds };
+    });
+  },
+
+  cleanSelectedLargeFiles: async () => {
+    const { largeFilesResult, largeFilesSelectedIds } = get();
+    if (!largeFilesResult || largeFilesSelectedIds.size === 0) return null;
+
+    const pathsToClean: string[] = [];
+    largeFilesResult.items.forEach((item) => {
+      if (largeFilesSelectedIds.has(item.id)) {
+        pathsToClean.push(item.path);
+      }
+    });
+
+    if (pathsToClean.length === 0) return null;
+
+    const res = await get().cleanSpecificPaths(pathsToClean);
+    if (res && res.items_deleted > 0) {
+      await get().scanLargeFiles();
+    }
+    return res;
   },
 }));
 
