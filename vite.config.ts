@@ -16,6 +16,29 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  build: {
+    target: "esnext",
+    minify: "esbuild",
+    chunkSizeWarningLimit: 600,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes("node_modules")) {
+            if (id.includes("recharts") || id.includes("d3-") || id.includes("victory")) {
+              return "vendor-charts";
+            }
+            if (id.includes("@phosphor-icons")) {
+              return "vendor-icons";
+            }
+            if (id.includes("motion") || id.includes("framer-motion")) {
+              return "vendor-motion";
+            }
+            return "vendor";
+          }
+        },
+      },
+    },
+  },
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent vite from obscuring rust errors
