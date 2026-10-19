@@ -16,6 +16,15 @@ impl NotificationManager {
             msg_clean, title_clean, sub_part
         );
 
+        // Do not spawn intrusive desktop banner notifications during automated test runs
+        if std::env::var("MYCLEAN_SUPPRESS_NOTIFICATIONS").is_ok()
+            || std::env::current_exe()
+                .map(|p| p.to_string_lossy().contains("deps/"))
+                .unwrap_or(false)
+        {
+            return Ok(());
+        }
+
         match std::process::Command::new("osascript")
             .arg("-e")
             .arg(&script)
