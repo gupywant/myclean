@@ -85,7 +85,7 @@ export const Sidebar: React.FC = () => {
           <div>
             <div className="text-sm font-bold tracking-tight text-white flex items-center space-x-1.5">
               <span>myclean</span>
-              <span className="text-[10px] font-mono text-cyan-400 font-semibold">v1.0</span>
+              <span className="text-[10px] font-mono text-cyan-400 font-semibold">v1.1</span>
             </div>
             <p className="text-[11px] text-slate-400">macOS Optimization Studio</p>
           </div>

@@ -8,7 +8,7 @@ set -euo pipefail
 # 3. Intel 64-bit (x86_64)
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VERSION="1.0.0"
+VERSION="${VERSION:-$(node -p "require('${REPO_ROOT}/package.json').version")}"
 OUTPUT_DIR="${REPO_ROOT}/release-artifacts"
 TEMP_DIR="/tmp/myclean-packaging-$$"
 
@@ -34,16 +34,12 @@ echo "--> Building frontend assets..."
 AARCH64_BIN="${REPO_ROOT}/src-tauri/target/aarch64-apple-darwin/release/myclean"
 X86_64_BIN="${REPO_ROOT}/src-tauri/target/x86_64-apple-darwin/release/myclean"
 
-# 2. Check binary targets (must use tauri CLI to embed frontend in production mode)
-if [ ! -f "${AARCH64_BIN}" ]; then
-  echo "--> Building aarch64 binary with tauri build..."
-  (cd "${REPO_ROOT}" && npx tauri build --target aarch64-apple-darwin --no-bundle)
-fi
+# 2. Build release binaries (always fresh)
+echo "--> Building aarch64 binary with tauri build..."
+(cd "${REPO_ROOT}" && npx tauri build --target aarch64-apple-darwin --no-bundle)
 
-if [ ! -f "${X86_64_BIN}" ]; then
-  echo "--> Building x86_64 binary with tauri build..."
-  (cd "${REPO_ROOT}" && npx tauri build --target x86_64-apple-darwin --no-bundle)
-fi
+echo "--> Building x86_64 binary with tauri build..."
+(cd "${REPO_ROOT}" && npx tauri build --target x86_64-apple-darwin --no-bundle)
 
 # 3. Create universal binary with lipo
 UNIVERSAL_BIN="${TEMP_DIR}/myclean_universal"

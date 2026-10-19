@@ -214,9 +214,9 @@ pub async fn scan_duplicates(
                 if trimmed.contains('\0') {
                     return Err("Duplicate scan path cannot contain null bytes".into());
                 }
-                let p = if trimmed.starts_with("~/") {
+                let p = if let Some(stripped) = trimmed.strip_prefix("~/") {
                     if let Some(home) = dirs::home_dir() {
-                        home.join(&trimmed[2..])
+                        home.join(stripped)
                     } else {
                         PathBuf::from(trimmed)
                     }
