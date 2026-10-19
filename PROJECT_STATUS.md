@@ -380,7 +380,34 @@
 - [x] **TypeScript & Vite Verification:**
   - `npx tsc --noEmit` and `npm run build` passing with 0 errors.
 
+### Phase 11.2: Smart Scan & Docker Safety Hotfix (Completed)
+- [x] **Critical Docker Cleaner Safety Audit (`src-tauri/src/cleaner.rs`):**
+  - Eliminated broad prune commands (`image prune -f`, `builder prune -f`) from `Cleaner::clean_items`.
+  - Generic filesystem cleaner (`clean_items`) strictly rejects any `docker://` or `docker:` pseudo-paths with an explicit security policy violation error.
+  - Smart Scan items for Docker (`dangling-images` and `build-cache`) are marked with `is_safe_to_clean: false`, `is_selected: false`, `is_eligible_for_cleanup: false`, and `ineligibility_reason: Some("Docker resources require dedicated scope-specific confirmation in Docker Studio".into())`.
+  - Docker cleanup remains strictly routed through the dedicated Docker safety engine (`DockerManager::clean`), requiring explicit confirmation, running container anti-race check, volume protection, and daemon health checks.
+- [x] **Truthful Smart Scan Progress Calculation (`src-tauri/src/scanner.rs`):**
+  - Replaced static 7-stage weighting with dynamic stage weights computed strictly across *enabled* stages (`100.0 / enabled_stages_count`).
+  - Indeterminate category states emit `category_progress: -1.0` during scope initialization and background checks.
+  - Disabled or skipped categories emit `CategoryScanStatus::Skipped` with `category_progress: 0.0` and do not artificially advance overall progress.
+  - `100.0%` overall completion is strictly gated behind all enabled stages finishing successfully without cancellation.
+  - Cancelled scans preserve honest progress reached at abort time with `CategoryScanStatus::Partial` and `was_cancelled: true`.
+- [x] **Cache Scope Non-Overlapping Guarantee (`src-tauri/src/scanner.rs`):**
+  - Implemented `Scanner::is_path_overlapping` with ancestor, descendant, and exact match checks.
+  - Maintained shared `visited_paths: HashSet<PathBuf>` across all scan stages.
+  - Excluded browser, messaging, and developer cache directories from Stage 1 (App Cache) to guarantee zero double-counting.
+  - Resolved parent-child overlap between `~/Library/Logs` and `~/Library/Logs/DiagnosticReports` in Stage 4.
+- [x] **Safety Regression Test Suite:**
+  - Added unit test `test_cleaner_rejects_docker_pseudo_paths` in `cleaner.rs`.
+  - Added unit tests `test_classify_candidate_rule_docker_review_required_and_ineligible` and `test_is_path_overlapping_detection` in `scanner.rs`.
+  - Added integration tests `test_generic_cleaner_strictly_rejects_docker_pseudo_paths` and `test_docker_scan_items_marked_ineligible_for_generic_cleanup` in `tests/docker_safety.rs`.
+  - Added integration tests `test_disabled_stages_do_not_advance_overall_progress`, `test_indeterminate_progress_on_initialization`, and `test_non_overlapping_cache_accounting_regression` in `tests/scanner_progress.rs`.
+  - **94 tests passing** across 8 test suites (`cargo test`).
+  - Zero compiler warnings and zero Clippy warnings (`cargo clippy -- -D warnings`).
+  - Clean TypeScript verification (`npx tsc --noEmit`) and Vite production build (`npm run build`).
+
 ### Phase 12: Homebrew Tap & Update Checker (Planned / Next)
 - [ ] Create Homebrew Tap (`gupywant/homebrew-tap`) and Cask formula (`Casks/myclean.rb`).
 - [ ] Implement opt-in GitHub Release update notifier with semantic version comparisons.
+
 
