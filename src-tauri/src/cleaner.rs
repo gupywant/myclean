@@ -246,8 +246,8 @@ impl Cleaner {
                 continue;
             }
 
-            // Execute deletion: Strictly via macOS Trash for 100% recoverability
-            match trash::delete(&canonical).map_err(|e| std::io::Error::other(e.to_string())) {
+            // Execute deletion: Strictly via macOS Trash for 100% recoverability (silent, without Finder audio)
+            match SafetyGuard::trash_item(&canonical).map_err(|e| std::io::Error::other(e.to_string())) {
                 Ok(_) => {
                     // Verify the file was indeed moved and no longer exists at original location
                     if canonical.exists() {

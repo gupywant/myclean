@@ -1197,7 +1197,7 @@ impl AppInspector {
                 continue;
             }
 
-            match trash::delete(target) {
+            match SafetyGuard::trash_item(target) {
                 Ok(_) => {
                     if !target.exists() {
                         bytes_freed += alloc;
@@ -1382,7 +1382,7 @@ impl AppInspector {
                 continue;
             }
 
-            match trash::delete(target) {
+            match SafetyGuard::trash_item(target) {
                 Ok(_) => {
                     if !target.exists() {
                         bytes_freed += alloc;

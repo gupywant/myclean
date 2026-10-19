@@ -1574,7 +1574,7 @@ where
                 continue;
             }
 
-            match trash::delete(&path) {
+            match SafetyGuard::trash_item(&path) {
                 Ok(_) => {
                     bytes_freed += size;
                     items_deleted += 1;
@@ -1755,7 +1755,7 @@ impl DeveloperEngine {
                             handled = true;
                             break;
                         } else {
-                            match trash::delete(canon) {
+                            match SafetyGuard::trash_item(canon) {
                                 Ok(_) => {
                                     total_freed += size;
                                     total_deleted += 1;

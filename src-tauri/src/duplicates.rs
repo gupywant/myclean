@@ -746,8 +746,8 @@ impl DuplicateScanner {
                     continue;
                 }
 
-                // Safe deletion strictly via macOS Trash
-                match trash::delete(&canonical).map_err(|e| std::io::Error::other(e.to_string())) {
+                // Safe deletion strictly via macOS Trash (silent, without Finder audio)
+                match SafetyGuard::trash_item(&canonical).map_err(|e| std::io::Error::other(e.to_string())) {
                     Ok(_) => {
                         if canonical.exists() {
                             errors.push(CleanErrorItem {

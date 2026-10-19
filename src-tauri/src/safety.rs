@@ -768,6 +768,37 @@ impl SafetyGuard {
 
         Ok(())
     }
+
+    /// Moves a path to macOS Trash silently without playing system sound effects.
+    ///
+    /// By default on macOS, the `trash` crate uses `DeleteMethod::Finder` which executes
+    /// AppleScript against Finder (`osascript -e 'tell application "Finder" to delete...'`).
+    /// That causes macOS Finder to emit the audible "Move to Trash" paper-crunch sound effect
+    /// on every deleted item and slows down operations.
+    ///
+    /// Using `DeleteMethod::NsFileManager` routes through native Cocoa `NSFileManager.trashItemAtURL`,
+    /// which executes silently, faster, and without UI audio interruptions while keeping
+    /// items 100% recoverable in the macOS Trash.
+    pub fn trash_item<P: AsRef<Path>>(path: P) -> Result<(), trash::Error> {
+        let mut ctx = trash::TrashContext::default();
+        #[cfg(target_os = "macos")]
+        {
+            use trash::macos::{DeleteMethod, TrashContextExtMacos};
+            ctx.set_delete_method(DeleteMethod::NsFileManager);
+        }
+        ctx.delete(path)
+    }
+
+    /// Moves multiple paths to macOS Trash silently without playing system sound effects.
+    pub fn trash_all<P: AsRef<Path>, I: IntoIterator<Item = P>>(paths: I) -> Result<(), trash::Error> {
+        let mut ctx = trash::TrashContext::default();
+        #[cfg(target_os = "macos")]
+        {
+            use trash::macos::{DeleteMethod, TrashContextExtMacos};
+            ctx.set_delete_method(DeleteMethod::NsFileManager);
+        }
+        ctx.delete_all(paths)
+    }
 }
 
 #[cfg(test)]
@@ -884,5 +915,20 @@ mod tests {
         assert!(!SafetyGuard::is_database_or_persistent_state(Path::new(
             "/Users/user/Library/Caches/Google/Chrome/data_0"
         )));
+    }
+
+    #[test]
+    fn test_silent_trash_execution() {
+        let temp_dir = std::env::temp_dir().join(format!("myclean_trash_test_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let test_file = temp_dir.join("test_silent.txt");
+        std::fs::write(&test_file, b"silent trash test").unwrap();
+        assert!(test_file.exists());
+
+        let res = SafetyGuard::trash_item(&test_file);
+        assert!(res.is_ok(), "Silent trashing failed: {:?}", res);
+        assert!(!test_file.exists(), "File should be moved to trash");
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }
