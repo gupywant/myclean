@@ -21,7 +21,7 @@ use crate::system::{SystemSummary, SystemTelemetry};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 pub struct AppState {
     pub db: Arc<Database>,
@@ -63,7 +63,12 @@ pub async fn start_scan(
         let app_handle = app.clone();
         let res = Scanner::scan_with_config(scan_config, cancel, move |prog: ScanProgress| {
             let _ = app_handle.emit("scan:progress", &prog);
+            for (_label, win) in app_handle.webview_windows() {
+                let _ = win.emit("scan:progress", &prog);
+            }
         });
+
+
 
         // Save scan record to SQLite if scan found results and wasn't cancelled early
         if !res.was_cancelled {
@@ -544,5 +549,3 @@ pub async fn clean_docker_resources(
         .await
         .map_err(|e| e.to_string())?
 }
-
-

@@ -15,6 +15,7 @@ use commands::AppState;
 use db::Database;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use tauri::Emitter;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -31,6 +32,20 @@ pub fn run() {
 
     tauri::Builder::default()
         .manage(app_state)
+        .setup(|app| {
+            let handle = app.handle().clone();
+
+            // Auto-trigger scan on launch if requested via environment variable or CLI flag
+            if std::env::var("MYCLEAN_START_SCAN").is_ok() {
+                let h = handle.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(1500));
+                    let _ = h.emit("trigger:start_scan", ());
+                });
+            }
+
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::get_system_metrics,
             commands::start_scan,
@@ -79,3 +94,4 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+

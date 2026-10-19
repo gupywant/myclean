@@ -1,5 +1,6 @@
 import React, { useEffect, Suspense } from "react";
 import { useFluxStore } from "./store/useFluxStore";
+import { listen } from "./lib/api";
 import { TitleBar } from "./components/layout/TitleBar";
 import { Sidebar } from "./components/layout/Sidebar";
 import { DashboardView } from "./components/dashboard/DashboardView";
@@ -56,7 +57,38 @@ export const App: React.FC = () => {
   useEffect(() => {
     fetchSystemSummary();
     fetchHistory();
+
+    // 1. Listen to trigger event from backend
+    let unlistenTrigger: (() => void) | null = null;
+
+    if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+      listen("trigger:start_scan", () => {
+        useFluxStore.getState().setActiveTab("dashboard");
+        useFluxStore.getState().startScan();
+      }).then((unlisten) => {
+        unlistenTrigger = unlisten;
+      }).catch(() => {});
+    }
+
+    // 2. Global keyboard shortcuts to trigger scan (Enter, Space, Cmd+S)
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const isInput = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
+      if (isInput) return;
+
+      if (e.key === "Enter" || e.code === "Space" || (e.metaKey && e.key.toLowerCase() === "s")) {
+        e.preventDefault();
+        useFluxStore.getState().setActiveTab("dashboard");
+        useFluxStore.getState().startScan();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      if (unlistenTrigger) unlistenTrigger();
+      window.removeEventListener("keydown", handleKeyDown);
+    };
   }, []);
+
 
   return (
     <div className="flex flex-col h-screen w-screen bg-[#07080D] text-slate-100 overflow-hidden">

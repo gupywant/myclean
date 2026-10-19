@@ -410,24 +410,35 @@
 - [x] **Diagnosed Root Cause:**
   - Resolved session ID mismatch between frontend (`scan-${Date.now()}`) and Rust backend (`chrono::Utc::now().timestamp_millis()`).
   - Added `session_id: Option<String>` to `ScanScopeConfig` so the active session identifier is synchronized end-to-end.
-  - Eliminated dropping of live `scan:progress` events in `useCleanStore.ts`.
+  - Resolved deep directory traversal silence: directories with large file counts (e.g. `cargo-xwin` with >9,500 files) previously traversed synchronously without emitting intermediate inspection events. Created `measure_path_with_metrics_cb` with a 40ms throttling callback to stream live file paths, inspected file counts, and interpolated intra-category progress during large directory walks.
+  - Replaced runtime dynamic bare-specifier imports in `App.tsx` (`import("@tauri-apps/api/...")`) with static imports (`import { listen } from "./lib/api"`), eliminating WebKit production runtime module resolution errors.
 - [x] **Indeterminate & Determinate Progress Architecture:**
   - Emitted `category_progress: -1.0` during scope initialization, rendering an active animated scanning shimmer rather than a misleading static `0%`.
   - Added indeterminate SVG progress ring animation (`animate-spin origin-center` with segmented stroke) during initial directory enumeration, transitioning smoothly to determinate circular fill once measured.
   - Enhanced `ScanCategoryPanel.tsx` with animated pulse gradient indicators for active indeterminate categories.
-- [x] **Subscription Lifecycle & Error Handling:**
+- [x] **Subscription Lifecycle & Event Delivery:**
   - Added module-level `activeScanUnlisten` tracking in `useCleanStore.ts` to cleanly unsubscribe prior listeners on scan start or cancellation.
+  - Implemented dual IPC emission in `commands.rs` (`app_handle.emit` and explicit `win.emit` per webview window) ensuring reliable delivery across all Tauri window contexts.
+  - Synchronized window title with live scan progress (`myclean - Scanning (X%) [Category]`) and completion state.
   - Added typed `scanError: string | null` state with error feedback and retry action in `SmartScanCenter.tsx`.
   - Ensured repeated scans cleanly reset metrics, session IDs, discovery feed, and results.
-- [x] **Real macOS Native Verification & Telemetry:**
-  - Executed native Smart Scan on live filesystem: 22,654 files inspected, 22.68 GB identified in 3.56s.
-  - Recorded telemetry: Initial state (0.0%) -> First event (0.0%, indeterminate -1.0) -> Intermediate (19.8%, 25.8%, 54.8%) -> Final UI state (100.0%, completed).
+- [x] **Real macOS Native GUI Verification & Live Application Results:**
+  - Built production macOS application bundle and installed to `/Applications/myclean.app`.
+  - Launched and tested the real installed GUI on desktop screen through all 7 stages:
+    1. System Cache
+    2. Application Cache
+    3. Browser & Messaging Caches
+    4. Developer Tooling & Build Caches
+    5. Application & System Logs
+    6. macOS Trash & Large Candidate Files
+    7. Docker Engine Resources
+  - Verified live UI state in the running application: smoothly progressed from 0% to 100%, culminating in the final results view with **7.9 GB Estimated Recoverable Space (59 candidate items)**, green checkmarks across all 7 stage cards, and the interactive **"Review Cleanup (7.9 GB)"** button.
 - [x] **Regression Test Suites:**
-  - Added Rust tests `test_session_id_coordination`, `test_progress_event_serialization_compatibility`, `test_repeated_scan_execution`, and `test_stale_session_event_rejection_logic` in `tests/scanner_progress.rs` (101/101 cargo tests passing).
+  - Added Rust tests `test_session_id_coordination`, `test_progress_event_serialization_compatibility`, `test_repeated_scan_execution`, and `test_stale_session_event_rejection_logic` in `tests/scanner_progress.rs`.
+  - **101/101 cargo tests passing** with 0 warnings across all test suites (`cargo test`).
   - Added frontend test suite `tests/scanner_progress.test.ts` (6/6 tests passing via `npx tsx`) verifying full lifecycle transitions from initialization to final completed result screen with 100% stage card finalization and selected bytes summation.
-  - Added defensive category completion guarantee in `useCleanStore.ts` ensuring all categories finalize into completed state upon result delivery.
+  - Added defensive category completion guarantee in `useCleanStore.ts` and `SmartScanCenter.tsx` ensuring 100% is displayed when `scanResult` is present.
   - Clean TypeScript checks (`npx tsc --noEmit`), Vite production build (`npm run build`), and Clippy checks (`cargo clippy -- -D warnings`).
-  - Installed and verified fresh bundle in `/Applications/myclean.app`.
 
 ### Phase 12: Homebrew Tap & Update Checker (Planned / Next)
 - [ ] Create Homebrew Tap (`gupywant/homebrew-tap`) and Cask formula (`Casks/myclean.rb`).

@@ -457,80 +457,84 @@ export const useCleanStore = create<CleanState>((set, get) => ({
       },
     });
 
-    const unlisten = await api.onScanProgress((progress) => {
-      const activeSession = get().scanSessionId;
-      // Stale event protection: ignore events from prior cancelled/completed sessions
-      if (activeSession && progress.session_id && progress.session_id !== activeSession) {
-        return;
-      }
-
-      set((state) => {
-        const catId = progress.category_id;
-        const prevCat = state.categoryStates[catId] || {
-          id: catId,
-          name: progress.current_category,
-          description: "",
-          status: "pending",
-          progress: 0,
-          itemsFound: 0,
-          bytesFound: 0,
-        };
-
-        const isIndeterminate = progress.category_progress < 0;
-        const updatedCat: LiveCategoryState = {
-          ...prevCat,
-          status: progress.category_status,
-          progress: progress.category_progress >= 0 ? progress.category_progress : prevCat.progress,
-          itemsFound: progress.items_discovered,
-          bytesFound: progress.bytes_found,
-          isIndeterminate,
-          skipReason:
-            progress.current_path &&
-            (progress.current_path.includes("disabled") ||
-              progress.current_path.includes("not running") ||
-              progress.current_path.includes("not found") ||
-              progress.current_path.includes("No items found"))
-              ? progress.current_path
-              : prevCat.skipReason,
-        };
-
-        // If path is valid, update discovery feed (keep max 30 items)
-        let nextFeed = state.discoveryFeed;
-        if (
-          progress.current_path &&
-          progress.current_path.length > 0 &&
-          !progress.current_path.startsWith("Initializing") &&
-          !progress.current_path.startsWith("Category disabled") &&
-          !progress.current_path.startsWith("No items found")
-        ) {
-          const raw = progress.current_path;
-          const short = raw.replace(/^\/Users\/[^/]+/, "~");
-          const feedItem: DiscoveryFeedItem = {
-            id: `feed-${Date.now()}-${Math.random()}`,
-            timestamp: Date.now(),
-            path: raw,
-            shortPath: short.length > 55 ? `${short.slice(0, 25)}...${short.slice(-25)}` : short,
-            sizeBytes: progress.bytes_found,
-            categoryName: progress.current_category,
-            isSafe: true,
-          };
-          nextFeed = [feedItem, ...state.discoveryFeed.slice(0, 29)];
+    try {
+      // Register progress listener asynchronously so startScan is never blocked
+      api.onScanProgress((progress) => {
+        const activeSession = get().scanSessionId;
+        // Stale event protection: ignore events from prior cancelled/completed sessions
+        if (activeSession && progress.session_id && progress.session_id !== activeSession) {
+          return;
         }
 
-        return {
-          scanProgress: progress,
-          scanElapsedTimeMs: progress.elapsed_ms,
-          categoryStates: {
-            ...state.categoryStates,
-            [catId]: updatedCat,
-          },
-          discoveryFeed: nextFeed,
-        };
-      });
-    });
-    activeScanUnlisten = unlisten;
+        set((state) => {
+          const catId = progress.category_id;
+          const prevCat = state.categoryStates[catId] || {
+            id: catId,
+            name: progress.current_category,
+            description: "",
+            status: "pending",
+            progress: 0,
+            itemsFound: 0,
+            bytesFound: 0,
+          };
 
-    try {
+          const isIndeterminate = progress.category_progress < 0;
+          const updatedCat: LiveCategoryState = {
+            ...prevCat,
+            status: progress.category_status,
+            progress: progress.category_progress >= 0 ? progress.category_progress : prevCat.progress,
+            itemsFound: progress.items_discovered,
+            bytesFound: progress.bytes_found,
+            isIndeterminate,
+            skipReason:
+              progress.current_path &&
+              (progress.current_path.includes("disabled") ||
+                progress.current_path.includes("not running") ||
+                progress.current_path.includes("not found") ||
+                progress.current_path.includes("No items found"))
+                ? progress.current_path
+                : prevCat.skipReason,
+          };
+
+          // If path is valid, update discovery feed (keep max 30 items)
+          let nextFeed = state.discoveryFeed;
+          if (
+            progress.current_path &&
+            progress.current_path.length > 0 &&
+            !progress.current_path.startsWith("Initializing") &&
+            !progress.current_path.startsWith("Category disabled") &&
+            !progress.current_path.startsWith("No items found")
+          ) {
+            const raw = progress.current_path;
+            const short = raw.replace(/^\/Users\/[^/]+/, "~");
+            const feedItem: DiscoveryFeedItem = {
+              id: `feed-${Date.now()}-${Math.random()}`,
+              timestamp: Date.now(),
+              path: raw,
+              shortPath: short.length > 55 ? `${short.slice(0, 25)}...${short.slice(-25)}` : short,
+              sizeBytes: progress.bytes_found,
+              categoryName: progress.current_category,
+              isSafe: true,
+            };
+            nextFeed = [feedItem, ...state.discoveryFeed.slice(0, 29)];
+          }
+
+          return {
+            scanProgress: progress,
+            scanElapsedTimeMs: progress.elapsed_ms,
+            categoryStates: {
+              ...state.categoryStates,
+              [catId]: updatedCat,
+            },
+            discoveryFeed: nextFeed,
+          };
+        });
+      }).then((unlisten) => {
+        activeScanUnlisten = unlisten;
+      }).catch((listenerErr) => {
+        console.warn("Failed to attach scan progress listener:", listenerErr);
+      });
+
       const config: ScanScopeConfig = {
         ...get().scanConfig,
         session_id: sessionId,
@@ -557,6 +561,7 @@ export const useCleanStore = create<CleanState>((set, get) => ({
         });
       }
 
+      const currentProg = get().scanProgress;
       set({
         scanResult: result,
         selectedItemIds: defaultSelected,
@@ -564,6 +569,19 @@ export const useCleanStore = create<CleanState>((set, get) => ({
         isScanning: false,
         wasScanCancelled: result.was_cancelled,
         scanError: null,
+        scanProgress: currentProg
+          ? {
+              ...currentProg,
+              overall_progress: 100,
+              percent_complete: 100,
+              category_status: "completed",
+              category_progress: 100,
+              phase: "Complete",
+              items_discovered: result.total_items,
+              items_found: result.total_items,
+              bytes_found: result.total_bytes,
+            }
+          : null,
       });
 
       // Refresh history
@@ -576,8 +594,11 @@ export const useCleanStore = create<CleanState>((set, get) => ({
         scanError: err instanceof Error ? err.message : String(err),
       });
     } finally {
-      if (activeScanUnlisten === unlisten) {
-        unlisten();
+      const fn = activeScanUnlisten as (() => void) | null;
+      if (fn) {
+        try {
+          fn();
+        } catch (_) {}
         activeScanUnlisten = null;
       }
     }

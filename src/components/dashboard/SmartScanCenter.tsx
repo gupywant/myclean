@@ -26,9 +26,9 @@ export const SmartScanCenter: React.FC = () => {
 
   const shouldReduceMotion = useReducedMotion();
 
-  // Progress metrics
-  const overallProgress = scanProgress?.overall_progress ?? (scanResult ? 100 : 0);
-  const clampedProgress = Math.min(100, Math.max(0, overallProgress));
+  // Progress metrics: always 100% when scanResult is present
+  const overallProgress = scanResult ? 100 : Math.min(100, Math.max(0, scanProgress?.overall_progress ?? 0));
+  const clampedProgress = overallProgress;
 
   // Indeterminate when scan is running but overall progress is still 0 with no inspected files or category is measuring
   const isIndeterminate =
@@ -306,9 +306,11 @@ export const SmartScanCenter: React.FC = () => {
             </>
           ) : (
             <motion.button
+              id="start-smart-scan-button"
               whileHover={shouldReduceMotion ? {} : { scale: 1.02 }}
               whileTap={shouldReduceMotion ? {} : { scale: 0.98 }}
               onClick={startScan}
+              onTap={startScan}
               className="px-8 py-3.5 rounded-xl bg-gradient-to-r from-indigo-500 via-indigo-600 to-cyan-500 hover:from-indigo-600 hover:to-cyan-600 text-white text-xs font-semibold tracking-wide shadow-lg shadow-indigo-500/30 transition-all duration-150 flex items-center space-x-2.5"
             >
               <Sparkle size={16} weight="fill" />

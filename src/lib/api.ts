@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+
+export { invoke, listen, type UnlistenFn };
 import type {
   SystemSummary,
   ScanResult,
@@ -200,6 +202,20 @@ export const api = {
       return () => {};
     }
     return listen<ScanProgress>("scan:progress", (event) => callback(event.payload));
+  },
+
+  async onScanStart(callback: () => void): Promise<UnlistenFn> {
+    if (!isTauriEnvironment()) {
+      return () => {};
+    }
+    return listen("scan:start", () => callback());
+  },
+
+  async onScanComplete(callback: (result: ScanResult) => void): Promise<UnlistenFn> {
+    if (!isTauriEnvironment()) {
+      return () => {};
+    }
+    return listen<ScanResult>("scan:complete", (event) => callback(event.payload));
   },
 
   async cleanItems(request: CleanRequest): Promise<CleanResult> {

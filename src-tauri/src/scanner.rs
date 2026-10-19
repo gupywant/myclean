@@ -494,14 +494,15 @@ impl Scanner {
         Self::measure_path_advanced(path, &mut visited, &mut skipped, &[], &cancel)
     }
 
-    /// Measures path with live ScanMetrics instrumentation
-    pub fn measure_path_with_metrics<P: AsRef<Path>>(
+    /// Measures path with live ScanMetrics instrumentation and per-file inspection callback
+    pub fn measure_path_with_metrics_cb<P: AsRef<Path>, Cb: FnMut(&Path, usize, u64)>(
         path: P,
         visited_inodes: &mut HashSet<(u64, u64)>,
         skipped_paths: &mut Vec<SkippedPath>,
         user_exclusions: &[String],
         cancel_token: &AtomicBool,
         metrics: &ScanMetrics,
+        mut on_inspect: Cb,
     ) -> (u64, u64, usize) {
         let p = path.as_ref();
         if !p.exists() {
@@ -552,6 +553,7 @@ impl Scanner {
                 }
             }
 
+            on_inspect(p, 1, alloc);
             return (alloc, logical, 1);
         }
 
@@ -644,6 +646,7 @@ impl Scanner {
                 total_allocated += meta.blocks() * 512;
                 total_logical += meta.len();
                 file_count += 1;
+                on_inspect(ep, file_count, total_allocated);
                 continue;
             }
 
@@ -665,10 +668,31 @@ impl Scanner {
                     total_logical += meta.len();
                 }
                 file_count += 1;
+                on_inspect(ep, file_count, total_allocated);
             }
         }
 
         (total_allocated, total_logical, file_count)
+    }
+
+    /// Measures path with live ScanMetrics instrumentation
+    pub fn measure_path_with_metrics<P: AsRef<Path>>(
+        path: P,
+        visited_inodes: &mut HashSet<(u64, u64)>,
+        skipped_paths: &mut Vec<SkippedPath>,
+        user_exclusions: &[String],
+        cancel_token: &AtomicBool,
+        metrics: &ScanMetrics,
+    ) -> (u64, u64, usize) {
+        Self::measure_path_with_metrics_cb(
+            path,
+            visited_inodes,
+            skipped_paths,
+            user_exclusions,
+            cancel_token,
+            metrics,
+            |_, _, _| {},
+        )
     }
 
     /// Measures path returning both allocated bytes, logical bytes, and file count.
@@ -882,13 +906,34 @@ impl Scanner {
                 );
 
                 let mut local_skipped = Vec::new();
-                let (alloc_bytes, logical_bytes, file_count) = Self::measure_path_with_metrics(
+                let mut last_walk_emit = Instant::now();
+                let (alloc_bytes, logical_bytes, file_count) = Self::measure_path_with_metrics_cb(
                     &path,
                     &mut visited_inodes,
                     &mut local_skipped,
                     &user_exclusions,
                     &cancel_token,
                     &metrics,
+                    |inspected_path, local_files, _local_bytes| {
+                        let now = Instant::now();
+                        if now.duration_since(last_walk_emit).as_millis() >= 40 {
+                            last_walk_emit = now;
+                            let intra_target = (local_files as f32 / (local_files as f32 + 150.0)).min(0.85);
+                            let intra_cat_prog = ((k as f32 + intra_target) / total_targets as f32) * 100.0;
+                            let intra_overall = base_overall + (intra_cat_prog / 100.0 * stage_weight);
+
+                            emitter.emit(
+                                stage_id,
+                                stage_name,
+                                &inspected_path.to_string_lossy(),
+                                "Inspecting files...",
+                                CategoryScanStatus::Scanning,
+                                intra_cat_prog,
+                                intra_overall,
+                                false,
+                            );
+                        }
+                    },
                 );
 
                 if !local_skipped.is_empty() {
