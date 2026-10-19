@@ -241,8 +241,45 @@
   - `cargo clippy -- -D warnings` passing with 0 warnings.
   - `npm run build` (`tsc && vite build`) passing cleanly with 0 type errors.
 
-### Phase 08: Settings & Cleanup History
-- [ ] Full audit trail viewer and custom exclusion editor
+### Phase 08: Settings & Cleanup History (COMPLETED)
+- [x] **Persistent SQLite Settings Architecture (`db.rs`, `commands.rs`):**
+  - Strongly typed `AppPreferences` supporting theme (`dark`, `light`, `system`), accent color (`violet`, `cyan`, `indigo`), animation intensity (`full`, `reduced`, `off`), CPU thread limit, large file thresholds, retention intervals, and scan reminder preferences.
+  - Zero plaintext secrets or credentials stored; atomic JSON updates in SQLite `app_settings`.
+  - Backend safety invariant: `move_to_trash_only = true` is permanently immutable in Rust and cannot be disabled from the frontend.
+- [x] **Safety & Privacy Preferences (`SettingsView.tsx`):**
+  - Move to macOS Trash enforced as the sole deletion mechanism; permanent deletion disabled with immutable locked badge.
+  - Default Dry-Run simulation toggle to enforce safe preview before execution.
+  - Comprehensive overview cards explaining SIP root protections, user identity protections, active application process locks, and Docker volume isolation.
+  - Zero-telemetry declaration: 100% local-first with zero analytics or background cloud uploads.
+- [x] **Exclusion Manager & Path Validator (`safety.rs`, `db.rs`):**
+  - Displays mandatory exclusions (macOS SIP roots, User Keychains, Apple Mail, iMessage, Docker VM storage, personal user documents) with human-friendly descriptions.
+  - Mandatory exclusions are strictly immutable and protected against removal.
+  - Real-time path validation in Rust rejecting path traversal (`..`), empty paths, root (`/`), and redundant paths already covered by mandatory rules.
+  - Custom exclusions persisted in SQLite `whitelist` table and automatically merged into all scan scopes (`user_exclusions`) and cleanup validations.
+- [x] **Advanced Cleanup History & Audit Timeline (`HistoryView.tsx`, `db.rs`):**
+  - Searchable, filterable activity timeline querying real SQLite audit records.
+  - Database-side pagination (`LIMIT` / `OFFSET`) supporting arbitrary page sizes.
+  - Multi-criteria filtering: search queries, cleanup category (`Deep Clean`, `Developer Spaces`, `Docker Studio`, `App Uninstaller`, `Duplicate Finder`), operation type (Actual vs Dry-Run Simulation), and sorting (`Most Recent`, `Largest Space`, `Most Items`).
+  - Interactive record inspection modal displaying raw JSON audit payload, itemized failure counts, and error summaries.
+- [x] **Interactive Cleanup Analytics (`HistoryView.tsx`):**
+  - Visual charts powered by Recharts with Futuristic Premium aesthetic.
+  - 30-day historical activity trend area chart with electric violet gradient.
+  - Category volume distribution bar chart.
+  - **Storage Recovery Invariant:** Clearly separates "Moved to macOS Trash" from "Docker Reclaimed Storage" and educates users that physical APFS blocks are reclaimed once Trash is emptied in Finder.
+- [x] **Database Schema Migrations & Integrity Maintenance (`db.rs`):**
+  - Versioned schema migrations using `PRAGMA user_version` (v2 migration adding indices for fast history queries and path lookups).
+  - Database health check reporting `PRAGMA integrity_check`, schema version, file size on disk, and record counts.
+  - Automatic and manual retention pruning (`30_days`, `90_days`, `180_days`, `forever`).
+  - Safe audit clearing requiring explicit confirmation without affecting files in macOS Trash.
+- [x] **Local Notifications Subsystem (`notifications.rs`):**
+  - Native macOS banner notifications using `osascript` for scan completions, clean completions, and error warnings.
+  - Does not introduce privileged background daemons or background battery drain.
+  - Test banner dispatch control in UI.
+- [x] **Automated Tests & Regression Coverage:**
+  - **76 tests passing** across all test suites (44 unit tests + 7 `apps_safety.rs` + 9 `developer_safety.rs` + 6 `docker_safety.rs` + 2 `duplicates_safety.rs` + 8 `settings_safety.rs`).
+  - Covers preferences persistence, immutable trash safety, mandatory exclusion protection, custom exclusion validation, history pagination, analytics aggregation, database integrity, and notification robustness.
+  - `cargo clippy -- -D warnings` passing with 0 warnings.
+  - `npm run build` (`tsc && vite build`) passing cleanly with 0 type errors.
 
 ### Phase 09: Performance, Security & QA
 - [ ] End-to-end performance profiling and memory stress tests
