@@ -231,16 +231,6 @@ impl StorageAnalyzer {
 
         let was_cancelled = cancel_token.load(Ordering::Relaxed);
 
-        // Sort largest items descending by allocated bytes
-        largest_files.sort_by_key(|a| std::cmp::Reverse(a.allocated_bytes));
-        largest_files.truncate(50);
-
-        largest_folders.sort_by_key(|a| std::cmp::Reverse(a.allocated_bytes));
-        largest_folders.truncate(25);
-
-        // Compute file type distribution
-        let total_analyzed_alloc = root_node.allocated_bytes;
-        let mut file_type_distribution = Vec::new();
         let all_categories = [
             FileTypeCategory::Developer,
             FileTypeCategory::Media,
@@ -249,6 +239,37 @@ impl StorageAnalyzer {
             FileTypeCategory::SystemCaches,
             FileTypeCategory::Other,
         ];
+
+        // Ensure category filters (e.g. Developer, Caches) are never starved
+        let mut categorized_largest: Vec<LargestItem> = Vec::new();
+        for cat in &all_categories {
+            let mut cat_files: Vec<LargestItem> = largest_files
+                .iter()
+                .filter(|f| f.file_type == Some(*cat))
+                .cloned()
+                .collect();
+            cat_files.sort_by_key(|a| std::cmp::Reverse(a.allocated_bytes));
+            cat_files.truncate(30);
+            categorized_largest.extend(cat_files);
+        }
+
+        // Global top 100
+        largest_files.sort_by_key(|a| std::cmp::Reverse(a.allocated_bytes));
+        largest_files.truncate(100);
+
+        for item in categorized_largest {
+            if !largest_files.iter().any(|f| f.path == item.path) {
+                largest_files.push(item);
+            }
+        }
+        largest_files.sort_by_key(|a| std::cmp::Reverse(a.allocated_bytes));
+
+        largest_folders.sort_by_key(|a| std::cmp::Reverse(a.allocated_bytes));
+        largest_folders.truncate(25);
+
+        // Compute file type distribution
+        let total_analyzed_alloc = root_node.allocated_bytes;
+        let mut file_type_distribution = Vec::new();
 
         for cat in all_categories {
             if let Some(&(alloc, logical, count)) = type_stats.get(&cat) {

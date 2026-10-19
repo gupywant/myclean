@@ -459,18 +459,37 @@ pub async fn analyze_storage(
         if trimmed.is_empty() || trimmed.contains('\0') {
             return Err("Storage analysis path cannot be empty or contain null bytes".into());
         }
-        SafetyGuard::check_path_traversal(trimmed).map_err(|e| e.to_string())?;
-        let p = PathBuf::from(trimmed);
-        if !p.exists() {
-            return Err(format!("Storage analysis path does not exist: {}", trimmed));
+
+        let resolved = match trimmed {
+            "home" | "~" => dirs::home_dir().unwrap_or_else(|| PathBuf::from("/")),
+            "caches" => {
+                let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+                home.join("Library/Caches")
+            }
+            "developer" => {
+                let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+                home.join("Library/Developer")
+            }
+            "downloads" => {
+                dirs::download_dir().unwrap_or_else(|| {
+                    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+                    home.join("Downloads")
+                })
+            }
+            other => PathBuf::from(other),
+        };
+
+        SafetyGuard::check_path_traversal(&resolved).map_err(|e| e.to_string())?;
+        if !resolved.exists() {
+            return Err(format!("Storage analysis path does not exist: {}", resolved.display()));
         }
-        if SafetyGuard::is_system_protected(&p) {
+        if SafetyGuard::is_system_protected(&resolved) {
             return Err(format!(
                 "Storage analysis rejected: '{}' is a protected macOS system location.",
-                trimmed
+                resolved.display()
             ));
         }
-        p.canonicalize().map_err(|e| e.to_string())?
+        resolved.canonicalize().map_err(|e| e.to_string())?
     } else {
         dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"))
     };

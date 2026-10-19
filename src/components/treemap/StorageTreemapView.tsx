@@ -18,6 +18,7 @@ import {
   FileVideo,
   FileText,
   MinusCircle,
+  CircleNotch,
 } from "@phosphor-icons/react";
 
 export const StorageTreemapView: React.FC = () => {
@@ -90,17 +91,13 @@ export const StorageTreemapView: React.FC = () => {
     }
   }, []);
 
-  const handleRunAnalysis = (preset: string) => {
+  const handleRunAnalysis = async (preset: string) => {
     setTargetPreset(preset);
-    let path: string | undefined;
-    if (preset === "downloads") {
-      path = "/Users/user/Downloads"; // In preview, or resolved by backend dirs::download_dir
-    } else if (preset === "caches") {
-      path = "/Users/user/Library/Caches";
-    } else if (preset === "developer") {
-      path = "/Users/user/Library/Developer";
+    if (isStorageAnalyzing) {
+      await cancelStorageAnalysis();
+      await new Promise((r) => setTimeout(r, 60));
     }
-    startStorageAnalysis(path);
+    startStorageAnalysis(preset);
   };
 
   const handleExcludePath = async (path: string, name: string) => {
@@ -149,52 +146,34 @@ export const StorageTreemapView: React.FC = () => {
 
         {/* Volume & Scan Controls */}
         <div className="flex items-center space-x-2.5">
-          {/* Target Scopes Dropdown */}
+          {/* Target Scopes Tabs */}
           <div className="flex items-center space-x-1.5 bg-white/[0.03] border border-white/[0.08] rounded-lg p-1 text-xs">
-            <button
-              onClick={() => handleRunAnalysis("home")}
-              disabled={isStorageAnalyzing}
-              className={`px-2.5 py-1 rounded-md transition-colors ${
-                targetPreset === "home"
-                  ? "bg-indigo-600 text-white font-medium"
-                  : "text-slate-400 hover:text-white"
-              }`}
-            >
-              Home (~)
-            </button>
-            <button
-              onClick={() => handleRunAnalysis("caches")}
-              disabled={isStorageAnalyzing}
-              className={`px-2.5 py-1 rounded-md transition-colors ${
-                targetPreset === "caches"
-                  ? "bg-indigo-600 text-white font-medium"
-                  : "text-slate-400 hover:text-white"
-              }`}
-            >
-              Caches
-            </button>
-            <button
-              onClick={() => handleRunAnalysis("developer")}
-              disabled={isStorageAnalyzing}
-              className={`px-2.5 py-1 rounded-md transition-colors ${
-                targetPreset === "developer"
-                  ? "bg-indigo-600 text-white font-medium"
-                  : "text-slate-400 hover:text-white"
-              }`}
-            >
-              Developer
-            </button>
-            <button
-              onClick={() => handleRunAnalysis("downloads")}
-              disabled={isStorageAnalyzing}
-              className={`px-2.5 py-1 rounded-md transition-colors ${
-                targetPreset === "downloads"
-                  ? "bg-indigo-600 text-white font-medium"
-                  : "text-slate-400 hover:text-white"
-              }`}
-            >
-              Downloads
-            </button>
+            {[
+              { id: "home", label: "Home (~)" },
+              { id: "caches", label: "Caches" },
+              { id: "developer", label: "Developer" },
+              { id: "downloads", label: "Downloads" },
+            ].map((p) => {
+              const isActive = targetPreset === p.id;
+              const isScanningThis = isStorageAnalyzing && isActive;
+
+              return (
+                <button
+                  key={p.id}
+                  onClick={() => handleRunAnalysis(p.id)}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center space-x-1.5 cursor-pointer ${
+                    isActive
+                      ? "bg-indigo-600 text-white shadow-sm shadow-indigo-600/30"
+                      : "text-slate-400 hover:text-white hover:bg-white/[0.05]"
+                  }`}
+                >
+                  {isScanningThis && (
+                    <CircleNotch size={12} className="animate-spin text-cyan-300 shrink-0" />
+                  )}
+                  <span>{p.label}</span>
+                </button>
+              );
+            })}
           </div>
 
           {/* Action Trigger */}
@@ -646,21 +625,35 @@ export const StorageTreemapView: React.FC = () => {
         {!isStorageAnalyzing && activeTab === "largest_files" && (
           <div className="flex-1 flex flex-col min-h-0 space-y-3">
             {/* Filters Bar */}
-            <div className="flex items-center space-x-2 text-xs">
-              <span className="text-slate-400">Filter Category:</span>
-              {["all", "archives", "developer", "media", "documents", "system_caches"].map((f) => (
-                <button
-                  key={f}
-                  onClick={() => setFilterType(f)}
-                  className={`px-2.5 py-1 rounded-md capitalize transition-colors ${
-                    filterType === f
-                      ? "bg-indigo-600 text-white font-medium"
-                      : "bg-white/[0.03] text-slate-400 hover:text-white border border-white/[0.06]"
-                  }`}
-                >
-                  {f === "system_caches" ? "Caches" : f}
-                </button>
-              ))}
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span className="text-slate-400 font-medium">Filter Category:</span>
+              {[
+                { id: "all", label: "All" },
+                { id: "archives", label: "Archives" },
+                { id: "developer", label: "Developer" },
+                { id: "media", label: "Media" },
+                { id: "documents", label: "Documents" },
+                { id: "system_caches", label: "Caches" },
+              ].map((f) => {
+                const count = (storageResult?.largest_files || []).filter(
+                  (item) => f.id === "all" || item.file_type === f.id
+                ).length;
+
+                return (
+                  <button
+                    key={f.id}
+                    onClick={() => setFilterType(f.id)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center space-x-1.5 cursor-pointer ${
+                      filterType === f.id
+                        ? "bg-indigo-600 text-white shadow-sm shadow-indigo-600/30"
+                        : "bg-white/[0.03] text-slate-400 hover:text-white hover:bg-white/[0.06] border border-white/[0.06]"
+                    }`}
+                  >
+                    <span>{f.label}</span>
+                    <span className="text-[10px] opacity-70 font-mono">({count})</span>
+                  </button>
+                );
+              })}
             </div>
 
             {/* Files List */}

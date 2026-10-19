@@ -454,11 +454,17 @@
   - One-click shortcut on the Trash row (`api.openTrashFolder()`) reveals the macOS Trash directly in Finder.
   - Added auto-refresh on window focus so external file deletions and Finder actions immediately reflect in the sidebar.
   - Added unit test `test_trash_metrics_gathering` (104/104 cargo tests passing).
-- [x] **Storage Analyzer Layout & Dynamic Treemap ResizeObserver:**
+- [x] **Storage Analyzer Layout, Dynamic Treemap & Unlocked Scope Tabs:**
   - Resolved initial container dimension bug where the Squarified Treemap SVG defaulted to fixed fallback dimensions (600x480) when `isStorageAnalyzing` completed, requiring the user to switch tabs to trigger a remount.
   - Implemented callback ref `ref={setContainerEl}` with an active `ResizeObserver` and window resize listeners, ensuring immediate and accurate DOM bounding box measurement the exact instant the analysis completes.
   - Added full vertical scrollability (`overflow-y-auto`) to the Storage Analyzer view so users can inspect complete hierarchical results.
   - Implemented **Folder Contents Breakdown** table directly beneath the Treemap, providing a comprehensive ranked list of all files and folders in the current directory (sorted by allocated bytes) with visual proportion bars, file counts, risk classification badges, "Drill Down / Explore" buttons, and "Reveal in Finder" shortcuts.
+  - **Fixed Scope Tabs Clickability & Cancellation Interruption:**
+    - Eliminated `disabled={isStorageAnalyzing}` that previously froze scope buttons (`Caches`, `Developer`, `Downloads`, `Home`) during scans, causing clicks to be discarded while Home was analyzing.
+    - Implemented seamless cancel-and-switch: clicking `Caches` or `Developer` mid-scan aborts the in-flight analysis immediately and smoothly transitions to analyzing the newly selected target.
+    - Added live loading spinners (`CircleNotch`) on active scanning tabs, providing instant visual feedback.
+    - Replaced hardcoded frontend paths with dynamic backend preset resolution (`"home"`, `"caches"`, `"developer"`, `"downloads"` via `dirs::home_dir()`).
+    - Enhanced Largest Files tab filter buttons with count badges `({count})` and per-category top item retention in `StorageAnalyzer::analyze`, preventing Developer and Caches filters from being starved by media/archives.
 
 ### Phase 12: Homebrew Tap & Update Checker (Planned / Next)
 - [ ] Create Homebrew Tap (`gupywant/homebrew-tap`) and Cask formula (`Casks/myclean.rb`).
