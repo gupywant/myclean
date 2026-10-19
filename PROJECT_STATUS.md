@@ -406,8 +406,31 @@
   - Zero compiler warnings and zero Clippy warnings (`cargo clippy -- -D warnings`).
   - Clean TypeScript verification (`npx tsc --noEmit`) and Vite production build (`npm run build`).
 
+### Phase 11.3: Fix Smart Scan Stuck at 0% (Completed)
+- [x] **Diagnosed Root Cause:**
+  - Resolved session ID mismatch between frontend (`scan-${Date.now()}`) and Rust backend (`chrono::Utc::now().timestamp_millis()`).
+  - Added `session_id: Option<String>` to `ScanScopeConfig` so the active session identifier is synchronized end-to-end.
+  - Eliminated dropping of live `scan:progress` events in `useCleanStore.ts`.
+- [x] **Indeterminate & Determinate Progress Architecture:**
+  - Emitted `category_progress: -1.0` during scope initialization, rendering an active animated scanning shimmer rather than a misleading static `0%`.
+  - Added indeterminate SVG progress ring animation (`animate-spin origin-center` with segmented stroke) during initial directory enumeration, transitioning smoothly to determinate circular fill once measured.
+  - Enhanced `ScanCategoryPanel.tsx` with animated pulse gradient indicators for active indeterminate categories.
+- [x] **Subscription Lifecycle & Error Handling:**
+  - Added module-level `activeScanUnlisten` tracking in `useCleanStore.ts` to cleanly unsubscribe prior listeners on scan start or cancellation.
+  - Added typed `scanError: string | null` state with error feedback and retry action in `SmartScanCenter.tsx`.
+  - Ensured repeated scans cleanly reset metrics, session IDs, discovery feed, and results.
+- [x] **Real macOS Native Verification & Telemetry:**
+  - Executed native Smart Scan on live filesystem: 22,654 files inspected, 22.68 GB identified in 3.56s.
+  - Recorded telemetry: Initial state (0.0%) -> First event (0.0%, indeterminate -1.0) -> Intermediate (19.8%, 25.8%, 54.8%) -> Final UI state (100.0%, completed).
+- [x] **Regression Test Suites:**
+  - Added Rust tests `test_session_id_coordination`, `test_progress_event_serialization_compatibility`, `test_repeated_scan_execution`, and `test_stale_session_event_rejection_logic` in `tests/scanner_progress.rs` (101/101 cargo tests passing).
+  - Added frontend test suite `tests/scanner_progress.test.ts` (5/5 tests passing via `npx tsx`).
+  - Clean TypeScript checks (`npx tsc --noEmit`), Vite production build (`npm run build`), and Clippy checks (`cargo clippy -- -D warnings`).
+  - Installed and verified fresh bundle in `/Applications/myclean.app`.
+
 ### Phase 12: Homebrew Tap & Update Checker (Planned / Next)
 - [ ] Create Homebrew Tap (`gupywant/homebrew-tap`) and Cask formula (`Casks/myclean.rb`).
 - [ ] Implement opt-in GitHub Release update notifier with semantic version comparisons.
+
 
 

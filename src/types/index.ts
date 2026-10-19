@@ -12,6 +12,7 @@ export type NavigationTab =
 export type RiskClassification = "safe_to_clean" | "review_required" | "protected";
 
 export interface ScanScopeConfig {
+  session_id?: string;
   include_system_caches: boolean;
   include_application_logs: boolean;
   include_developer_xcode: boolean;
@@ -89,6 +90,7 @@ export interface LiveCategoryState {
   itemsFound: number;
   bytesFound: number;
   skipReason?: string;
+  isIndeterminate?: boolean;
 }
 
 export interface DiscoveryFeedItem {

@@ -93,6 +93,8 @@ fn default_docker_scope() -> bool {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScanScopeConfig {
+    #[serde(default)]
+    pub session_id: Option<String>,
     pub include_system_caches: bool,
     pub include_application_logs: bool,
     pub include_developer_xcode: bool,
@@ -112,6 +114,7 @@ pub struct ScanScopeConfig {
 impl Default for ScanScopeConfig {
     fn default() -> Self {
         Self {
+            session_id: None,
             include_system_caches: true,
             include_application_logs: true,
             include_developer_xcode: true,
@@ -724,7 +727,10 @@ impl Scanner {
         F: Fn(ScanProgress) + Send + Sync,
     {
         let start_time = Instant::now();
-        let session_id = format!("scan-{}", chrono::Utc::now().timestamp_millis());
+        let session_id = config
+            .session_id
+            .clone()
+            .unwrap_or_else(|| format!("scan-{}", chrono::Utc::now().timestamp_millis()));
         let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
 
         let metrics = Arc::new(ScanMetrics::default());

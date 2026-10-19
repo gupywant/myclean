@@ -17,6 +17,7 @@ export const SmartScanCenter: React.FC = () => {
     scanProgress,
     scanResult,
     wasScanCancelled,
+    scanError,
     startScan,
     cancelScan,
     setActiveTab,
@@ -28,6 +29,12 @@ export const SmartScanCenter: React.FC = () => {
   // Progress metrics
   const overallProgress = scanProgress?.overall_progress ?? (scanResult ? 100 : 0);
   const clampedProgress = Math.min(100, Math.max(0, overallProgress));
+
+  // Indeterminate when scan is running but overall progress is still 0 with no inspected files or category is measuring
+  const isIndeterminate =
+    isScanning &&
+    ((scanProgress?.category_progress ?? 0) < 0 ||
+      (clampedProgress === 0 && (scanProgress?.files_inspected ?? 0) === 0));
 
   // Circle dimensions
   const radius = 95;
@@ -94,11 +101,22 @@ export const SmartScanCenter: React.FC = () => {
               r={radius}
               stroke="url(#scanGradient)"
               strokeWidth="9"
-              strokeDasharray={circumference}
-              strokeDashoffset={strokeDashoffset}
+              strokeDasharray={
+                isIndeterminate
+                  ? `${circumference * 0.25} ${circumference * 0.75}`
+                  : circumference
+              }
+              strokeDashoffset={isIndeterminate ? 0 : strokeDashoffset}
               strokeLinecap="round"
               fill="transparent"
-              className="transition-[stroke-dashoffset] duration-300 ease-out"
+              className={
+                isIndeterminate && !shouldReduceMotion
+                  ? "animate-spin origin-center"
+                  : "transition-[stroke-dashoffset] duration-300 ease-out"
+              }
+              style={
+                isIndeterminate ? { transformOrigin: "110px 110px" } : undefined
+              }
             />
           </svg>
 
@@ -119,18 +137,44 @@ export const SmartScanCenter: React.FC = () => {
           <div className="absolute w-36 h-36 rounded-full bg-[#0D101C] border border-white/10 flex flex-col items-center justify-center shadow-inner shadow-black/80 p-3 select-none">
             {isScanning ? (
               <div className="flex flex-col items-center justify-center space-y-1">
-                <span className="text-3xl font-bold font-mono text-white tracking-tight">
-                  {Math.round(clampedProgress)}%
-                </span>
-                <span className="text-[10px] font-mono text-cyan-400 font-medium">
-                  {elapsedFormatted}
-                </span>
+                {isIndeterminate ? (
+                  <div className="flex flex-col items-center space-y-0.5">
+                    <span className="text-xs font-bold font-mono text-cyan-300 uppercase tracking-widest animate-pulse">
+                      Analyzing
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-mono">
+                      {scanProgress?.phase || "Enumerating"}
+                    </span>
+                  </div>
+                ) : (
+                  <>
+                    <span className="text-3xl font-bold font-mono text-white tracking-tight">
+                      {Math.max(1, Math.round(clampedProgress))}%
+                    </span>
+                    <span className="text-[10px] font-mono text-cyan-400 font-medium">
+                      {elapsedFormatted}
+                    </span>
+                  </>
+                )}
                 <div className="flex items-center space-x-1.5 px-2 py-0.5 rounded-full bg-cyan-500/10 border border-cyan-500/20">
                   <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
                   <span className="text-[9px] font-semibold uppercase tracking-wider text-cyan-300">
                     Live
                   </span>
                 </div>
+              </div>
+            ) : scanError ? (
+              <div className="flex flex-col items-center justify-center space-y-1 text-center px-2">
+                <WarningCircle size={28} className="text-rose-400" weight="fill" />
+                <span className="text-xs font-bold text-rose-300 uppercase tracking-wider">
+                  Scan Failed
+                </span>
+                <span
+                  className="text-[10px] font-mono text-slate-400 line-clamp-2"
+                  title={scanError}
+                >
+                  {scanError}
+                </span>
               </div>
             ) : wasScanCancelled ? (
               <div className="flex flex-col items-center justify-center space-y-1 text-center">
@@ -176,6 +220,8 @@ export const SmartScanCenter: React.FC = () => {
               <span className="bg-gradient-to-r from-cyan-400 via-indigo-300 to-violet-400 bg-clip-text text-transparent">
                 Scanning {scanProgress?.current_category || "System Trees"}...
               </span>
+            ) : scanError ? (
+              "Smart Scan Failed"
             ) : wasScanCancelled ? (
               "Smart Scan Stopped Early"
             ) : scanResult ? (
@@ -188,6 +234,8 @@ export const SmartScanCenter: React.FC = () => {
           <p className="text-xs text-slate-400 leading-relaxed font-mono truncate max-w-lg mx-auto">
             {isScanning ? (
               scanProgress?.current_path || "Analyzing directory trees and files..."
+            ) : scanError ? (
+              `An error occurred during scan: ${scanError}`
             ) : wasScanCancelled ? (
               `Scan was halted by user. Found ${totalScannedItems} items (${formatBytes(totalScannedBytes)}) before cancellation.`
             ) : scanResult ? (
@@ -264,7 +312,13 @@ export const SmartScanCenter: React.FC = () => {
               className="px-8 py-3.5 rounded-xl bg-gradient-to-r from-indigo-500 via-indigo-600 to-cyan-500 hover:from-indigo-600 hover:to-cyan-600 text-white text-xs font-semibold tracking-wide shadow-lg shadow-indigo-500/30 transition-all duration-150 flex items-center space-x-2.5"
             >
               <Sparkle size={16} weight="fill" />
-              <span>{wasScanCancelled ? "Restart Smart Analysis" : "Start Smart Analysis"}</span>
+              <span>
+                {scanError
+                  ? "Retry Smart Analysis"
+                  : wasScanCancelled
+                  ? "Restart Smart Analysis"
+                  : "Start Smart Analysis"}
+              </span>
             </motion.button>
           )}
         </div>

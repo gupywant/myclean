@@ -117,6 +117,7 @@ interface CleanState {
   discoveryFeed: DiscoveryFeedItem[];
   wasScanCancelled: boolean;
   scanElapsedTimeMs: number;
+  scanError: string | null;
 
   // Storage Analyzer State
   storageResult: StorageAnalysisResult | null;
@@ -284,6 +285,8 @@ interface CleanState {
   sendTestNotification: () => Promise<void>;
 }
 
+let activeScanUnlisten: (() => void) | null = null;
+
 export const useCleanStore = create<CleanState>((set, get) => ({
   activeTab: "dashboard",
   systemSummary: null,
@@ -298,6 +301,7 @@ export const useCleanStore = create<CleanState>((set, get) => ({
   discoveryFeed: [],
   wasScanCancelled: false,
   scanElapsedTimeMs: 0,
+  scanError: null,
   scanConfig: {
     include_system_caches: true,
     include_application_logs: true,
@@ -413,10 +417,18 @@ export const useCleanStore = create<CleanState>((set, get) => ({
   },
 
   startScan: async () => {
+    // 1. Unsubscribe any active listener from a prior scan
+    if (activeScanUnlisten) {
+      activeScanUnlisten();
+      activeScanUnlisten = null;
+    }
+
     const sessionId = `scan-${Date.now()}`;
     set({
       isScanning: true,
       wasScanCancelled: false,
+      scanError: null,
+      scanResult: null,
       scanSessionId: sessionId,
       categoryStates: { ...INITIAL_CATEGORY_STATES },
       discoveryFeed: [],
@@ -434,7 +446,7 @@ export const useCleanStore = create<CleanState>((set, get) => ({
         items_found: 0,
         bytes_found: 0,
         category_status: "scanning",
-        category_progress: 0,
+        category_progress: -1,
         overall_progress: 0,
         percent_complete: 0,
         skipped_count: 0,
@@ -446,8 +458,9 @@ export const useCleanStore = create<CleanState>((set, get) => ({
     });
 
     const unlisten = await api.onScanProgress((progress) => {
-      // Validate session ID if present
-      if (get().scanSessionId && progress.session_id && progress.session_id !== get().scanSessionId) {
+      const activeSession = get().scanSessionId;
+      // Stale event protection: ignore events from prior cancelled/completed sessions
+      if (activeSession && progress.session_id && progress.session_id !== activeSession) {
         return;
       }
 
@@ -463,12 +476,22 @@ export const useCleanStore = create<CleanState>((set, get) => ({
           bytesFound: 0,
         };
 
+        const isIndeterminate = progress.category_progress < 0;
         const updatedCat: LiveCategoryState = {
           ...prevCat,
           status: progress.category_status,
           progress: progress.category_progress >= 0 ? progress.category_progress : prevCat.progress,
           itemsFound: progress.items_discovered,
           bytesFound: progress.bytes_found,
+          isIndeterminate,
+          skipReason:
+            progress.current_path &&
+            (progress.current_path.includes("disabled") ||
+              progress.current_path.includes("not running") ||
+              progress.current_path.includes("not found") ||
+              progress.current_path.includes("No items found"))
+              ? progress.current_path
+              : prevCat.skipReason,
         };
 
         // If path is valid, update discovery feed (keep max 30 items)
@@ -505,9 +528,13 @@ export const useCleanStore = create<CleanState>((set, get) => ({
         };
       });
     });
+    activeScanUnlisten = unlisten;
 
     try {
-      const config = get().scanConfig;
+      const config: ScanScopeConfig = {
+        ...get().scanConfig,
+        session_id: sessionId,
+      };
       const result = await api.startScan(config);
       const defaultSelected = new Set<string>();
       result.items.forEach((item) => {
@@ -521,20 +548,32 @@ export const useCleanStore = create<CleanState>((set, get) => ({
         selectedItemIds: defaultSelected,
         isScanning: false,
         wasScanCancelled: result.was_cancelled,
+        scanError: null,
       });
 
       // Refresh history
       get().fetchHistory();
     } catch (err) {
       console.error("Scan error:", err);
-      set({ isScanning: false, wasScanCancelled: true });
+      set({
+        isScanning: false,
+        wasScanCancelled: false,
+        scanError: err instanceof Error ? err.message : String(err),
+      });
     } finally {
-      unlisten();
+      if (activeScanUnlisten === unlisten) {
+        unlisten();
+        activeScanUnlisten = null;
+      }
     }
   },
 
   cancelScan: async () => {
     await api.cancelScan();
+    if (activeScanUnlisten) {
+      activeScanUnlisten();
+      activeScanUnlisten = null;
+    }
     set((state) => {
       // Mark active categories as partial
       const nextCats = { ...state.categoryStates };

@@ -201,21 +201,31 @@ export const ScanCategoryPanel: React.FC = () => {
               </div>
 
               {/* Thin Bottom Progress Indicator Line */}
-              <div className="h-1 w-full bg-white/[0.04] rounded-full overflow-hidden mt-2">
-                <div
-                  className={`h-full rounded-full transition-all duration-300 ${
-                    state.status === "completed"
-                      ? "bg-emerald-500"
-                      : state.status === "scanning"
-                      ? "bg-cyan-400"
-                      : state.status === "partial"
-                      ? "bg-amber-400"
-                      : "bg-transparent"
-                  }`}
-                  style={{
-                    width: `${state.status === "completed" ? 100 : state.progress > 0 ? state.progress : isCurrentScanning ? 50 : 0}%`,
-                  }}
-                />
+              <div className="h-1 w-full bg-white/[0.04] rounded-full overflow-hidden mt-2 relative">
+                {isCurrentScanning && (state.isIndeterminate || state.progress <= 0) ? (
+                  <div className="h-full w-full bg-gradient-to-r from-transparent via-cyan-400 to-transparent animate-pulse rounded-full" />
+                ) : (
+                  <div
+                    className={`h-full rounded-full transition-all duration-300 ${
+                      state.status === "completed"
+                        ? "bg-emerald-500"
+                        : state.status === "scanning"
+                        ? "bg-cyan-400"
+                        : state.status === "partial"
+                        ? "bg-amber-400"
+                        : "bg-transparent"
+                    }`}
+                    style={{
+                      width: `${
+                        state.status === "completed"
+                          ? 100
+                          : state.progress > 0
+                          ? state.progress
+                          : 0
+                      }%`,
+                    }}
+                  />
+                )}
               </div>
             </motion.div>
           );
